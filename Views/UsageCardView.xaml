@@ -1,0 +1,254 @@
+<UserControl x:Class="AIUsageChecker.Views.UsageCardView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:controls="clr-namespace:AIUsageChecker.Controls"
+             xmlns:converters="clr-namespace:AIUsageChecker.Converters"
+             mc:Ignorable="d" 
+             d:DesignHeight="115" d:DesignWidth="150">
+    <UserControl.Resources>
+        <converters:RemainingToBrushConverter x:Key="RemainingToBrushConverter"/>
+        <converters:StatusBadgeBrushConverter x:Key="StatusBadgeBrushConverter"/>
+        <converters:StatusBadgeTextBrushConverter x:Key="StatusBadgeTextBrushConverter"/>
+        <converters:NullToVisibilityConverter x:Key="NullToVisibilityConverter"/>
+    </UserControl.Resources>
+
+    <Grid Cursor="Hand">
+        <!-- ベースカード枠 -->
+        <Border x:Name="CardBase"
+                Background="#1E2322" 
+                BorderBrush="#2D3834" 
+                BorderThickness="1" 
+                CornerRadius="8" 
+                Padding="8,9"
+                MinHeight="136">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="RenderTransformOrigin" Value="0.5, 0.5"/>
+                    <Setter Property="RenderTransform">
+                        <Setter.Value>
+                            <ScaleTransform ScaleX="1.0" ScaleY="1.0"/>
+                        </Setter.Value>
+                    </Setter>
+                    <Setter Property="Effect">
+                        <Setter.Value>
+                            <DropShadowEffect Color="#000000" BlurRadius="6" ShadowDepth="1" Opacity="0.2"/>
+                        </Setter.Value>
+                    </Setter>
+                    <Style.Triggers>
+                        <!-- マウスホバー -->
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="BorderBrush" Value="#22C55E"/>
+                            <Setter Property="Background" Value="#232B29"/>
+                        </Trigger>
+
+                        <!-- 要望1: 週次制限枯渇時のダークレッド枠＋ぼかし光彩 -->
+                        <DataTrigger Binding="{Binding IsWeeklyExhausted}" Value="True">
+                            <Setter Property="BorderBrush" Value="#EF4444"/>
+                            <Setter Property="Background" Value="#241B1B"/>
+                            <Setter Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#DC2626" BlurRadius="12" ShadowDepth="0" Opacity="0.65"/>
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- ヘッダー部: サービス名とCLIステータスバッジ -->
+                <Grid Grid.Row="0" Margin="0,0,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding IconGlyph}" FontSize="12" Foreground="{Binding ThemeAccentColor}" Margin="0,0,4,0"/>
+                        <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" FontSize="13" Foreground="#F3F4F6"/>
+                    </StackPanel>
+
+                    <!-- CLIバッジ -->
+                    <Border Grid.Column="1" 
+                            Background="{Binding CliInfo.StatusBadgeText, Converter={StaticResource StatusBadgeBrushConverter}}" 
+                            CornerRadius="4" 
+                            Padding="4,1">
+                        <TextBlock Text="{Binding CliInfo.StatusBadgeText}" 
+                                   FontSize="9" 
+                                   FontWeight="SemiBold"
+                                   Foreground="{Binding CliInfo.StatusBadgeText, Converter={StaticResource StatusBadgeTextBrushConverter}}"/>
+                    </Border>
+                </Grid>
+
+                <!-- 中央部: 利用制限表示 -->
+                <Grid Grid.Row="1" VerticalAlignment="Center" Margin="0,2">
+                    <!-- パターンA: 2重制限表示 (5時間制限 ＋ 週次制限の両方がある場合) -->
+                    <StackPanel Visibility="{Binding SecondaryLimit, Converter={StaticResource NullToVisibilityConverter}}" 
+                                VerticalAlignment="Center">
+                        <!-- 1段目: 5時間制限 -->
+                        <Grid Margin="0,0,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding PrimaryLimit.Title}" FontSize="10" FontWeight="SemiBold" Foreground="#E5E7EB"/>
+                                <TextBlock Text="{Binding PrimaryLimit.ResetTimeText}" FontSize="9" FontWeight="Medium" Foreground="#CBD5E1" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" 
+                                       Text="{Binding PrimaryLimit.DisplayPercentString}" 
+                                       FontSize="11" FontWeight="Bold" Foreground="#F3F4F6" 
+                                       VerticalAlignment="Center" Margin="2,0,4,0"/>
+                            <Grid Grid.Column="2" Width="22" Height="22" VerticalAlignment="Center">
+                                <controls:CircularProgressBar 
+                                    Percentage="{Binding PrimaryLimit.RemainingPercent}"
+                                    ProgressBrush="{Binding PrimaryLimit.RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
+                                    StrokeThickness="2.5"/>
+                            </Grid>
+                        </Grid>
+
+                        <!-- 区切り線 -->
+                        <Border Height="1" Background="#26342E" Margin="0,1,0,2"/>
+
+                        <!-- 2段目: 週次制限 -->
+                        <Grid Margin="0,1,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding SecondaryLimit.Title}" FontSize="10" FontWeight="SemiBold" Foreground="#E5E7EB"/>
+                                <TextBlock Text="{Binding SecondaryLimit.ResetTimeText}" FontSize="9" FontWeight="Medium" Foreground="#CBD5E1" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="1" 
+                                       Text="{Binding SecondaryLimit.DisplayPercentString}" 
+                                       FontSize="11" FontWeight="Bold" Foreground="#F3F4F6" 
+                                       VerticalAlignment="Center" Margin="2,0,4,0"/>
+                            <Grid Grid.Column="2" Width="22" Height="22" VerticalAlignment="Center">
+                                <controls:CircularProgressBar 
+                                    Percentage="{Binding SecondaryLimit.RemainingPercent}"
+                                    ProgressBrush="{Binding SecondaryLimit.RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
+                                    StrokeThickness="2.5"/>
+                            </Grid>
+                        </Grid>
+                    </StackPanel>
+
+                    <!-- パターンB: 単一制限表示 (Grok, Copilot, Claude 等) -->
+                    <Grid Visibility="{Binding SecondaryLimit, Converter={StaticResource NullToVisibilityConverter}, ConverterParameter=Inverse}" 
+                          VerticalAlignment="Center">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- 左側: メイン制限名とリセット時間 -->
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,2,0">
+                            <TextBlock Text="{Binding PrimaryLimit.Title}" FontSize="11" FontWeight="SemiBold" Foreground="#D1D5DB"/>
+                            <TextBlock Text="{Binding PrimaryLimit.ResetTimeText}" FontSize="10" FontWeight="SemiBold" Foreground="#E2E8F0" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
+                            <TextBlock Text="{Binding SubTitle}" FontSize="8.5" Foreground="#6B7280" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+
+                        <!-- 右側: 円形プログレスリングとパーセンテージ -->
+                        <Grid Grid.Column="1" Width="44" Height="44" Margin="4,0,0,0">
+                            <controls:CircularProgressBar 
+                                Percentage="{Binding PrimaryLimit.RemainingPercent}"
+                                ProgressBrush="{Binding PrimaryLimit.RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
+                                StrokeThickness="3.5"/>
+                            <TextBlock Text="{Binding PrimaryLimit.DisplayPercentString}" 
+                                       FontSize="11" 
+                                       FontWeight="Bold" 
+                                       Foreground="#E5E7EB" 
+                                       HorizontalAlignment="Center" 
+                                       VerticalAlignment="Center"/>
+                        </Grid>
+                    </Grid>
+                </Grid>
+
+                <!-- 下部: 移動ボタン (並び替え用) -->
+                <Grid Grid.Row="2" Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Button Grid.Column="0" 
+                            Content="◀" 
+                            FontSize="8" 
+                            Padding="4,1" 
+                            Background="Transparent" 
+                            BorderThickness="0" 
+                            Foreground="#6B7280"
+                            Command="{Binding DataContext.MoveLeftCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            ToolTip="左に移動"/>
+
+                    <TextBlock Grid.Column="1" 
+                               Text="詳細表示 ↗" 
+                               FontSize="9" 
+                               Foreground="#10B981" 
+                               HorizontalAlignment="Center" 
+                               VerticalAlignment="Center" 
+                               Opacity="0.8"/>
+
+                    <Button Grid.Column="2" 
+                            Content="▶" 
+                            FontSize="8" 
+                            Padding="4,1" 
+                            Background="Transparent" 
+                            BorderThickness="0" 
+                            Foreground="#6B7280"
+                            Command="{Binding DataContext.MoveRightCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            CommandParameter="{Binding}"
+                            ToolTip="右に移動"/>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- 要望3: 0%から100%回復時のグリーンホタル点滅（Breathe Glow）オーバーレイ -->
+        <Border x:Name="RecoveryGlowBorder"
+                CornerRadius="8"
+                BorderThickness="1.5"
+                BorderBrush="#10B981"
+                Background="Transparent"
+                IsHitTestVisible="False"
+                Opacity="0">
+            <Border.Effect>
+                <DropShadowEffect Color="#10B981" BlurRadius="12" ShadowDepth="0" Opacity="0.8"/>
+            </Border.Effect>
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsRecoveredGlowActive}" Value="True">
+                            <DataTrigger.EnterActions>
+                                <BeginStoryboard Name="BreatheStoryboard">
+                                    <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                         From="0.15" To="0.95" Duration="0:0:1.4">
+                                            <DoubleAnimation.EasingFunction>
+                                                <SineEase EasingMode="EaseInOut"/>
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </DataTrigger.EnterActions>
+                            <DataTrigger.ExitActions>
+                                <StopStoryboard BeginStoryboardName="BreatheStoryboard"/>
+                            </DataTrigger.ExitActions>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+        </Border>
+    </Grid>
+</UserControl>

@@ -1,0 +1,90 @@
+# ===================================================================
+# .gitignore for AIUsageChecker (.NET 10 / WPF / Visual Studio / VS Code)
+# ===================================================================
+
+# -------------------------------------------------------------------
+# 🔒 セキュリティ & 認証情報・シークレット (絶対にコミットしない)
+# -------------------------------------------------------------------
+*auth.json
+*token*.json
+*secret*.json
+credentials.json
+key.json
+*.env
+*.env.*
+*.pfx
+*.p12
+*.pem
+*.key
+
+# アプリケーション固有のローカルキャッシュ・ユーザー設定
+settings.json
+quota_cache.json
+render.log
+*.log
+
+# -------------------------------------------------------------------
+# 🔨 ビルド成果物 & 中間ファイル (.NET / C#)
+# -------------------------------------------------------------------
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+publish/
+[Pp]kg/
+
+# Visual Studio 一時ファイル
+.vs/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.sln.docstates
+*.pidb
+*.booproj
+*.svclog
+
+# Visual Studio Code / IDE 設定
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*~
+
+# -------------------------------------------------------------------
+# 🧪 テスト結果・コード分析・カバレッジ
+# -------------------------------------------------------------------
+TestResults/
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+coverage.*
+
+# -------------------------------------------------------------------
+# 💻 OS 自動生成ファイル
+# -------------------------------------------------------------------
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# -------------------------------------------------------------------
+# 📦 パッケージキャッシュ・一時ファイル
+# -------------------------------------------------------------------
+*.nupkg
+*.snupkg
+project.lock.json
+project.fragment.lock.json
+artifacts/
+*.tmp

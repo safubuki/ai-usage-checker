@@ -1,0 +1,258 @@
+<UserControl x:Class="AIUsageChecker.Views.DetailPopupView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:controls="clr-namespace:AIUsageChecker.Controls"
+             xmlns:converters="clr-namespace:AIUsageChecker.Converters"
+             mc:Ignorable="d" 
+             d:DesignHeight="380" d:DesignWidth="460">
+    <UserControl.Resources>
+        <converters:RemainingToBrushConverter x:Key="RemainingToBrushConverter"/>
+        <converters:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+        <converters:NullToVisibilityConverter x:Key="NullToVisibilityConverter"/>
+        <converters:StatusBadgeBrushConverter x:Key="StatusBadgeBrushConverter"/>
+        <converters:StatusBadgeTextBrushConverter x:Key="StatusBadgeTextBrushConverter"/>
+    </UserControl.Resources>
+
+    <Border Background="#1A1F1E" 
+            BorderBrush="#22C55E" 
+            BorderThickness="1.5" 
+            CornerRadius="10" 
+            Padding="12,10"
+            MaxHeight="310"
+            Width="468">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="20" ShadowDepth="4" Opacity="0.6" Color="#000000"/>
+        </Border.Effect>
+
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/> <!-- 1. ヘッダー (固定表示) -->
+                <RowDefinition Height="*"/>    <!-- 2. スクロール可能コンテンツ領域 -->
+            </Grid.RowDefinitions>
+
+            <!-- 1. ヘッダー (サービス名・閉じる✕ボタン: 常に上部に固定) -->
+            <Grid Grid.Row="0" Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding SelectedItem.IconGlyph}" FontSize="18" Foreground="{Binding SelectedItem.ThemeAccentColor}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                    <StackPanel>
+                        <TextBlock Text="{Binding SelectedItem.DisplayName}" FontSize="16" FontWeight="Bold" Foreground="#F9FAFB"/>
+                        <TextBlock Text="{Binding SelectedItem.SubTitle}" FontSize="10" Foreground="#9CA3AF"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <Button Grid.Column="1" 
+                        Content="✕" 
+                        Width="26" Height="26" 
+                        Background="#262E2B" 
+                        Foreground="#E5E7EB" 
+                        BorderBrush="#374151" 
+                        BorderThickness="1" 
+                        Command="{Binding CloseDetailCommand}"
+                        ToolTip="詳細を閉じる"
+                        Cursor="Hand">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="13"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+            </Grid>
+
+            <!-- 2. スクロール領域 (利用状況・CLI管理・ログ・フッター) -->
+            <ScrollViewer x:Name="DetailScrollViewer"
+                          Grid.Row="1" 
+                          VerticalScrollBarVisibility="Auto" 
+                          HorizontalScrollBarVisibility="Disabled"
+                          Focusable="False">
+                <StackPanel Margin="0,0,4,0">
+                    <!-- 2-1. 利用状況カード (1枠・2枠・3枠柔軟に対応) -->
+                    <Border Background="#141817" BorderBrush="#2D3834" BorderThickness="1" CornerRadius="8" Padding="10,6" Margin="0,0,0,8">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,4">
+                                <TextBlock Text="利用制限・Usage状況" FontSize="10.5" FontWeight="Bold" Foreground="#9CA3AF"/>
+                                <TextBlock HorizontalAlignment="Right" FontSize="9.5" Foreground="#10B981" VerticalAlignment="Center">
+                                    <Run Text="確認コマンド: " Foreground="#6B7280"/>
+                                    <Run Text="{Binding SelectedItem.CliInfo.UsageCheckCommand, Mode=OneWay}" FontWeight="Bold"/>
+                                </TextBlock>
+                            </Grid>
+
+                            <ItemsControl ItemsSource="{Binding SelectedItem.AllLimits}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="0,2,0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,0">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold" Foreground="#E5E7EB" Margin="0,0,6,0"/>
+                                                    <TextBlock Text="{Binding ResetTimeText}" FontSize="9" Foreground="#9CA3AF" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding LimitDescription}" FontSize="9" Foreground="#6B7280" TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1" 
+                                                       Text="{Binding DisplayPercentString}" 
+                                                       FontSize="12" FontWeight="Bold" Foreground="#F3F4F6" 
+                                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <Grid Grid.Column="2" Width="26" Height="26" VerticalAlignment="Center">
+                                                <controls:CircularProgressBar 
+                                                    Percentage="{Binding RemainingPercent}"
+                                                    ProgressBrush="{Binding RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
+                                                    StrokeThickness="3"/>
+                                            </Grid>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 2-2. CLI管理セクション (インストール・更新・最新状態の維持) -->
+                    <Border Background="#141817" BorderBrush="#2D3834" BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,0,8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                                        <TextBlock Text="CLIツール: " FontSize="10.5" Foreground="#9CA3AF"/>
+                                        <TextBlock Text="{Binding SelectedItem.CliInfo.Name}" FontSize="10.5" FontWeight="Bold" Foreground="#F3F4F6" Margin="0,0,6,0"/>
+                                        <TextBlock Text="{Binding SelectedItem.CliInfo.InstalledVersion, StringFormat='(v{0})'}" FontSize="10" Foreground="#10B981" Visibility="{Binding SelectedItem.CliInfo.IsInstalled, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding SelectedItem.CliInfo.StatusMessage}" FontSize="9.5" Foreground="#D1D5DB"/>
+                                </StackPanel>
+
+                                <!-- CLI状態バッジ -->
+                                <Border Grid.Column="1" 
+                                        Background="{Binding SelectedItem.CliInfo.StatusBadgeText, Converter={StaticResource StatusBadgeBrushConverter}}" 
+                                        CornerRadius="4" 
+                                        Padding="6,2" 
+                                        VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding SelectedItem.CliInfo.StatusBadgeText}" 
+                                               FontSize="9.5" FontWeight="Bold"
+                                               Foreground="{Binding SelectedItem.CliInfo.StatusBadgeText, Converter={StaticResource StatusBadgeTextBrushConverter}}"/>
+                                </Border>
+                            </Grid>
+
+                            <!-- ボタン群 -->
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,6,0,0">
+                                <!-- 未インストール時: ワンクリックインストールボタン -->
+                                <Button Content="📥 ワンクリックでインストール" 
+                                        FontSize="9.5" FontWeight="Bold"
+                                        Padding="8,3" Margin="0,0,6,0"
+                                        Background="#10B981" Foreground="#FFFFFF"
+                                        BorderThickness="0"
+                                        Command="{Binding InstallCliCommand}"
+                                        CommandParameter="{Binding SelectedItem}"
+                                        Cursor="Hand"
+                                        Visibility="{Binding SelectedItem.CliInfo.IsInstalled, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=Inverse}">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="4"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+
+                                <!-- 更新あり時: 最新アップデートボタン -->
+                                <Button Content="🚀 最新バージョンに更新" 
+                                        FontSize="9.5" FontWeight="Bold"
+                                        Padding="8,3" Margin="0,0,6,0"
+                                        Background="#3B82F6" Foreground="#FFFFFF"
+                                        BorderThickness="0"
+                                        Command="{Binding UpdateCliCommand}"
+                                        CommandParameter="{Binding SelectedItem}"
+                                        Cursor="Hand"
+                                        Visibility="{Binding SelectedItem.CliInfo.HasUpdate, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="4"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+
+                                <!-- 更新確認ボタン -->
+                                <Button Content="🔍 更新を確認" 
+                                        FontSize="9.5"
+                                        Padding="8,3" Margin="0,0,6,0"
+                                        Background="#262E2B" Foreground="#D1D5DB" 
+                                        BorderBrush="#374151" BorderThickness="1"
+                                        Command="{Binding CheckCliCommand}"
+                                        CommandParameter="{Binding SelectedItem}"
+                                        Cursor="Hand">
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="4"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- 2-3. CLI実行ログコンソール (しっかり縦幅115pxを確保して見やすく) -->
+                    <Border Background="#0A0E0D" BorderBrush="#1B2623" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,8" Height="115">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0" Margin="0,0,0,4">
+                                <TextBlock Text="CLI実行ログ" FontSize="9.5" FontWeight="Bold" Foreground="#9CA3AF"/>
+                                <Button Content="クリア" FontSize="8.5" HorizontalAlignment="Right" Background="Transparent" Foreground="#6B7280" BorderThickness="0" Command="{Binding ClearLogsCommand}" Cursor="Hand"/>
+                            </Grid>
+                            <ListBox Grid.Row="1" 
+                                     ItemsSource="{Binding ConsoleLogs}" 
+                                     Background="Transparent" 
+                                     BorderThickness="0" 
+                                     MinHeight="85"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" FontSize="9.5" FontFamily="Consolas, Meiryo" Foreground="#A7F3D0" TextWrapping="Wrap" Margin="0,1.5"/>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Border>
+
+                    <!-- 2-4. 下部アクション (最終取得日時・閉じるボタン) -->
+                    <Grid Margin="0,0,0,2">
+                        <TextBlock Text="{Binding SelectedItem.LastRefreshed, StringFormat='最終取得: {0:HH:mm:ss}'}" 
+                                   FontSize="9" Foreground="#6B7280" VerticalAlignment="Center"/>
+                        <Button Content="閉じる" 
+                                FontSize="10" HorizontalAlignment="Right"
+                                Padding="12,3" 
+                                Background="#262E2B" Foreground="#D1D5DB" 
+                                BorderBrush="#374151" BorderThickness="1"
+                                Command="{Binding CloseDetailCommand}"
+                                Cursor="Hand">
+                            <Button.Resources>
+                                <Style TargetType="Border">
+                                    <Setter Property="CornerRadius" Value="4"/>
+                                </Style>
+                            </Button.Resources>
+                        </Button>
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+    </Border>
+</UserControl>
