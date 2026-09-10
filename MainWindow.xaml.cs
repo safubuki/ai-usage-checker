@@ -1,14 +1,10 @@
 using System;
 using System.ComponentModel;
-using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using AIUsageChecker.Models;
 using AIUsageChecker.ViewModels;
 
@@ -42,7 +38,7 @@ public partial class MainWindow : Window
         Loaded += MainWindow_Loaded;
     }
 
-    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
         var workArea = SystemParameters.WorkArea;
         _normalLeft = Math.Max(0, workArea.Right - Width - 24);
@@ -55,137 +51,6 @@ public partial class MainWindow : Window
 
         // ViewModelプロパティ変更の監視
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
-
-        var args = Environment.GetCommandLineArgs();
-        if (args.Any(a => a.StartsWith("--render")))
-        {
-            _viewModel.IsDocked = false;
-        }
-
-        if (args.Contains("--render-test"))
-        {
-            for (int i = 0; i < 30 && _viewModel.IsRefreshing; i++)
-            {
-                await Task.Delay(200);
-            }
-            await Task.Delay(500);
-            SaveScreenshot("app_rendered.png");
-            Application.Current.Shutdown();
-        }
-        else if (args.Contains("--render-docked"))
-        {
-            _viewModel.IsDocked = true;
-            UpdateDockState(true);
-            await Task.Delay(500);
-            SaveScreenshot("app_docked.png");
-            Application.Current.Shutdown();
-        }
-        else if (args.Contains("--render-detail-gpt"))
-        {
-            await Task.Delay(500);
-            for (int i = 0; i < 30 && _viewModel.IsRefreshing; i++)
-            {
-                await Task.Delay(200);
-            }
-            await Task.Delay(1000);
-            var gptItem = _viewModel.Items.FirstOrDefault(x => x.ServiceType == AiServiceType.GPT);
-            if (gptItem != null)
-            {
-                _viewModel.SelectedItem = gptItem;
-                _viewModel.IsDetailOpen = true;
-            }
-            await Task.Delay(500);
-            SaveScreenshot("app_gpt_detail.png");
-
-            // スクロール最下部のキャプチャも取得
-            var scrollViewer = FindVisualChild<System.Windows.Controls.ScrollViewer>(this);
-            if (scrollViewer != null)
-            {
-                scrollViewer.ScrollToBottom();
-                await Task.Delay(300);
-                SaveScreenshot("app_gpt_detail_scrolled.png");
-            }
-
-            Application.Current.Shutdown();
-        }
-        else if (args.Contains("--render-detail-copilot"))
-        {
-            await Task.Delay(500);
-            for (int i = 0; i < 30 && _viewModel.IsRefreshing; i++)
-            {
-                await Task.Delay(200);
-            }
-            await Task.Delay(1000);
-            var copilotItem = _viewModel.Items.FirstOrDefault(x => x.ServiceType == AiServiceType.Copilot);
-            if (copilotItem != null)
-            {
-                _viewModel.SelectedItem = copilotItem;
-                _viewModel.IsDetailOpen = true;
-            }
-            await Task.Delay(500);
-            SaveScreenshot("app_copilot_detail.png");
-            Application.Current.Shutdown();
-        }
-        else if (args.Contains("--render-glow-test"))
-        {
-            await Task.Delay(500);
-            for (int i = 0; i < 30 && _viewModel.IsRefreshing; i++)
-            {
-                await Task.Delay(200);
-            }
-            await Task.Delay(500);
-
-            // テスト状態の設定: GPTを週次枯渇（赤グロー）、Claudeを回復ホタル点滅（緑グロー）に設定
-            var gptItem = _viewModel.Items.FirstOrDefault(x => x.ServiceType == AiServiceType.GPT);
-            if (gptItem != null && gptItem.SecondaryLimit != null)
-            {
-                gptItem.SecondaryLimit.RemainingPercent = 0;
-                gptItem.IsWeeklyExhausted = true;
-            }
-
-            var claudeItem = _viewModel.Items.FirstOrDefault(x => x.ServiceType == AiServiceType.Claude);
-            if (claudeItem != null)
-            {
-                claudeItem.IsRecoveredGlowActive = true;
-            }
-
-            await Task.Delay(800);
-            SaveScreenshot("app_glow_test.png");
-            SaveScreenshot("app_rendered.png");
-            Application.Current.Shutdown();
-        }
-        else if (args.Contains("--render-claude-subscribed"))
-        {
-            await Task.Delay(500);
-            for (int i = 0; i < 30 && _viewModel.IsRefreshing; i++)
-            {
-                await Task.Delay(200);
-            }
-            await Task.Delay(500);
-
-            var claudeItem = _viewModel.Items.FirstOrDefault(x => x.ServiceType == AiServiceType.Claude);
-            if (claudeItem != null)
-            {
-                claudeItem.CliInfo.IsSubscribed = true;
-                claudeItem.CliInfo.StatusMessage = "プラン: Claude Pro";
-                claudeItem.PrimaryLimit.Title = "5時間制限";
-                claudeItem.PrimaryLimit.LimitDescription = "5-hour session limit";
-                claudeItem.PrimaryLimit.RemainingPercent = 88.0;
-                claudeItem.PrimaryLimit.ResetTimeText = $"{DateTime.Now.AddHours(3).AddMinutes(45):HH:mm} リセット";
-                claudeItem.PrimaryLimit.CustomDisplayPercentText = null;
-
-                if (claudeItem.SecondaryLimit == null) claudeItem.SecondaryLimit = new UsageLimitInfo();
-                claudeItem.SecondaryLimit.Title = "週次制限";
-                claudeItem.SecondaryLimit.LimitDescription = "Weekly limit";
-                claudeItem.SecondaryLimit.RemainingPercent = 70.0;
-                claudeItem.SecondaryLimit.ResetTimeText = "09/14 18:00 リセット";
-                claudeItem.SecondaryLimit.CustomDisplayPercentText = null;
-            }
-
-            await Task.Delay(500);
-            SaveScreenshot("app_claude_subscribed_test.png");
-            Application.Current.Shutdown();
-        }
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -302,34 +167,6 @@ public partial class MainWindow : Window
         WindowState = WindowState.Minimized;
     }
 
-    private void SaveScreenshot(string fileName)
-    {
-        try
-        {
-            UpdateLayout();
-            int width = (int)Math.Ceiling(ActualWidth > 0 ? ActualWidth : Width);
-            int height = (int)Math.Ceiling(ActualHeight > 0 ? ActualHeight : Height);
-
-            var rtb = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
-            rtb.Render(this);
-
-            var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(rtb));
-
-            var outDir = @"C:\Users\kamep\.gemini\antigravity-ide\brain\5a0ad8a9-1118-4f88-b4ca-d5e0f8f491ce";
-            var outPath = Path.Combine(outDir, fileName);
-            using (var fs = new FileStream(outPath, FileMode.Create))
-            {
-                encoder.Save(fs);
-            }
-            File.WriteAllText(@"C:\git_home\ai-usage-checker\render.log", $"Success: {outPath}, width={width}, height={height}");
-        }
-        catch (Exception ex)
-        {
-            File.WriteAllText(@"C:\git_home\ai-usage-checker\render.log", $"Failed: {ex}");
-        }
-    }
-
     private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ButtonState == MouseButtonState.Pressed)
@@ -356,17 +193,5 @@ public partial class MainWindow : Window
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
         Close();
-    }
-
-    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
-    {
-        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-        {
-            var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T typedChild) return typedChild;
-            var result = FindVisualChild<T>(child);
-            if (result != null) return result;
-        }
-        return null;
     }
 }
