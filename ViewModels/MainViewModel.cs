@@ -161,12 +161,12 @@ public class MainViewModel : ViewModelBase
 
         ClearLogsCommand = new RelayCommand(() => ConsoleLogs.Clear());
 
-        // 自動更新タイマー (5分ごと)
+        // 自動更新タイマー (5分ごと: バックグラウンドでサイレント更新)
         _autoRefreshTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMinutes(Math.Max(1, _settings.AutoRefreshMinutes))
         };
-        _autoRefreshTimer.Tick += async (_, _) => await RefreshAllAsync();
+        _autoRefreshTimer.Tick += async (_, _) => await RefreshAllAsync(isSilent: true);
         _autoRefreshTimer.Start();
 
         // データの初期化
@@ -190,22 +190,23 @@ public class MainViewModel : ViewModelBase
         Items = InitialCatalogFactory.CreateInitialServices(_settings.DisplayOrder);
 
         // 起動時に非同期でCLI確認とUsage更新
-        _ = RefreshAllAsync();
+        _ = RefreshAllAsync(isSilent: false);
     }
 
-    public async Task RefreshAllAsync()
+    public async Task RefreshAllAsync(bool isSilent = false)
     {
         if (IsRefreshing) return;
         IsRefreshing = true;
-        StatusText = "利用状況を取得中...";
+
+        // サイレント定期更新の場合はヘッダーの「取得中...」表示も出さず、ユーザーに更新を意識させない
+        if (!isSilent)
+        {
+            StatusText = "利用状況を取得中...";
+        }
 
         try
         {
-            // 全カードのバッジを「確認中...」にしておく
-            foreach (var item in Items)
-            {
-                item.CliInfo.IsBusy = true;
-            }
+            // 既存カードのバッジを「確認中...」に戻さない（裏側で取得し、完了時にパッと切り替える）
 
             // 1. 各カードのCLIチェック用の一時CliInfoを用意して並列実行
             // （画面上のCliInfoを直接更新しないため、個別完了時にバッジがバラバラ変わらない）
@@ -244,7 +245,10 @@ public class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
-            StatusText = $"更新エラー: {ex.Message}";
+            if (!isSilent)
+            {
+                StatusText = $"更新エラー: {ex.Message}";
+            }
         }
         finally
         {
