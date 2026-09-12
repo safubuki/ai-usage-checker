@@ -42,73 +42,88 @@ public class UsageFetcherService
 
     public async Task FetchAllUsagesAsync(IEnumerable<AiUsageItem> items)
     {
-        LogOutputReceived?.Invoke($"[{DateTime.Now:HH:mm:ss}] 全AI利用状況の同期を開始...");
-
-        // 1. OpenAI Codex の生クォータを直接バックエンドから取得
-        try
-        {
-            _lastCodexData = await _codexClient.FetchCodexQuotaAsync();
-        }
-        catch (Exception ex)
-        {
-            LogOutputReceived?.Invoke($"[Codex] 取得例外: {ex.Message}");
-        }
-
-        // 2. Claude の契約状態および利用枠 (5h/週次) を取得
-        try
-        {
-            _lastClaudeData = await _claudeClient.FetchClaudeQuotaAsync();
-        }
-        catch (Exception ex)
-        {
-            LogOutputReceived?.Invoke($"[Claude] 取得例外: {ex.Message}");
-        }
-
-        // 3. Gemini は Antigravity LanguageServer からリアルタイムRPCクォータを取得
-        try
-        {
-            var groups = await _quotaClient.FetchQuotaSummaryAsync();
-            if (groups != null && groups.Count > 0)
-            {
-                _cachedGroups = groups;
-                SaveCache(groups);
-            }
-        }
-        catch (Exception ex)
-        {
-            LogOutputReceived?.Invoke($"[Gemini] LanguageServer取得例外: {ex.Message}");
-        }
-
-        // 4. GitHub Copilot の生クォータを直接 gh api から取得
-        try
-        {
-            _lastCopilotData = await _copilotClient.FetchCopilotQuotaAsync();
-        }
-        catch (Exception ex)
-        {
-            LogOutputReceived?.Invoke($"[Copilot] 取得例外: {ex.Message}");
-        }
-
-        // 5. Grok (xAI / SuperGrok) の利用状況をバックエンドAPIから取得
-        try
-        {
-            _lastGrokData = await _grokClient.FetchGrokQuotaAsync();
-        }
-        catch (Exception ex)
-        {
-            LogOutputReceived?.Invoke($"[Grok] 取得例外: {ex.Message}");
-        }
-
-        // 6. 各サービスにデータを反映
+        await FetchAllRawDataAsync();
         foreach (var item in items)
         {
-            await FetchUsageAsync(item);
+            ApplyUsage(item);
         }
-
-        LogOutputReceived?.Invoke($"[{DateTime.Now:HH:mm:ss}] 全AI利用状況の同期が完了しました。");
     }
 
-    public async Task FetchUsageAsync(AiUsageItem item)
+    public async Task FetchAllRawDataAsync()
+    {
+        LogOutputReceived?.Invoke($"[{DateTime.Now:HH:mm:ss}] 全AI利用状況の取得を開始...");
+
+        // 各AIサービスの生データ取得を並列実行して高速化
+        var codexTask = Task.Run(async () =>
+        {
+            try
+            {
+                _lastCodexData = await _codexClient.FetchCodexQuotaAsync();
+            }
+            catch (Exception ex)
+            {
+                LogOutputReceived?.Invoke($"[Codex] 取得例外: {ex.Message}");
+            }
+        });
+
+        var claudeTask = Task.Run(async () =>
+        {
+            try
+            {
+                _lastClaudeData = await _claudeClient.FetchClaudeQuotaAsync();
+            }
+            catch (Exception ex)
+            {
+                LogOutputReceived?.Invoke($"[Claude] 取得例外: {ex.Message}");
+            }
+        });
+
+        var geminiTask = Task.Run(async () =>
+        {
+            try
+            {
+                var groups = await _quotaClient.FetchQuotaSummaryAsync();
+                if (groups != null && groups.Count > 0)
+                {
+                    _cachedGroups = groups;
+                    SaveCache(groups);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogOutputReceived?.Invoke($"[Gemini] LanguageServer取得例外: {ex.Message}");
+            }
+        });
+
+        var copilotTask = Task.Run(async () =>
+        {
+            try
+            {
+                _lastCopilotData = await _copilotClient.FetchCopilotQuotaAsync();
+            }
+            catch (Exception ex)
+            {
+                LogOutputReceived?.Invoke($"[Copilot] 取得例外: {ex.Message}");
+            }
+        });
+
+        var grokTask = Task.Run(async () =>
+        {
+            try
+            {
+                _lastGrokData = await _grokClient.FetchGrokQuotaAsync();
+            }
+            catch (Exception ex)
+            {
+                LogOutputReceived?.Invoke($"[Grok] 取得例外: {ex.Message}");
+            }
+        });
+
+        await Task.WhenAll(codexTask, claudeTask, geminiTask, copilotTask, grokTask);
+        LogOutputReceived?.Invoke($"[{DateTime.Now:HH:mm:ss}] 全AI利用状況の生データ取得完了。");
+    }
+
+    public void ApplyUsage(AiUsageItem item)
     {
         var groups = _cachedGroups;
 
@@ -134,10 +149,16 @@ public class UsageFetcherService
                 break;
         }
 
+        item.IsDataLoaded = true;
         item.PrimaryLimit.RefreshDisplay();
         item.SecondaryLimit?.RefreshDisplay();
         item.UpdateStatusAndCheckRecovery();
         item.LastRefreshed = DateTime.Now;
+    }
+
+    public async Task FetchUsageAsync(AiUsageItem item)
+    {
+        ApplyUsage(item);
         await Task.CompletedTask;
     }
 
@@ -224,12 +245,14 @@ public class UsageFetcherService
             item.PrimaryLimit.Title = "5時間制限";
             item.PrimaryLimit.LimitDescription = "5h limit (resets 18:21)";
             item.PrimaryLimit.RemainingPercent = 0.0;
+            item.PrimaryLimit.CustomDisplayPercentText = null;
             item.PrimaryLimit.ResetTimeText = "18:21 リセット (枯渇)";
 
             if (item.SecondaryLimit == null) item.SecondaryLimit = new UsageLimitInfo();
             item.SecondaryLimit.Title = "週次制限";
             item.SecondaryLimit.LimitDescription = "Weekly limit (resets 13:15 on 15 Sep)";
             item.SecondaryLimit.RemainingPercent = 52.0;
+            item.SecondaryLimit.CustomDisplayPercentText = null;
             item.SecondaryLimit.ResetTimeText = "09/15 13:15 リセット";
 
             item.AllLimits.Clear();
@@ -331,6 +354,7 @@ public class UsageFetcherService
                 item.PrimaryLimit.Title = "5時間制限";
                 item.PrimaryLimit.LimitDescription = !string.IsNullOrEmpty(fiveHourBucket.Description) ? fiveHourBucket.Description : "Five Hour Limit Remaining";
                 item.PrimaryLimit.RemainingPercent = fiveHourBucket.RemainingFraction * 100.0;
+                item.PrimaryLimit.CustomDisplayPercentText = null;
                 item.PrimaryLimit.ResetTimeText = FormatResetTime(fiveHourBucket.ResetTime, "リセット");
             }
 
@@ -340,6 +364,7 @@ public class UsageFetcherService
                 item.SecondaryLimit.Title = "週次制限";
                 item.SecondaryLimit.LimitDescription = !string.IsNullOrEmpty(weeklyBucket.Description) ? weeklyBucket.Description : "Weekly Limit Remaining";
                 item.SecondaryLimit.RemainingPercent = weeklyBucket.RemainingFraction * 100.0;
+                item.SecondaryLimit.CustomDisplayPercentText = null;
                 item.SecondaryLimit.ResetTimeText = FormatResetTime(weeklyBucket.ResetTime, "リセット");
             }
 
@@ -350,12 +375,14 @@ public class UsageFetcherService
             item.PrimaryLimit.Title = "5時間制限";
             item.PrimaryLimit.LimitDescription = "Five Hour Limit Remaining";
             item.PrimaryLimit.RemainingPercent = 81.0;
+            item.PrimaryLimit.CustomDisplayPercentText = null;
             item.PrimaryLimit.ResetTimeText = $"{DateTime.Now.AddHours(4).AddMinutes(5):HH:mm} リセット";
 
             if (item.SecondaryLimit == null) item.SecondaryLimit = new UsageLimitInfo();
             item.SecondaryLimit.Title = "週次制限";
             item.SecondaryLimit.LimitDescription = "Weekly Limit Remaining";
             item.SecondaryLimit.RemainingPercent = 74.0;
+            item.SecondaryLimit.CustomDisplayPercentText = null;
             item.SecondaryLimit.ResetTimeText = "09/11 23:46 リセット";
         }
 

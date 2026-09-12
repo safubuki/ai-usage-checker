@@ -11,7 +11,7 @@ public class CliInfo : ViewModelBase
     private string _installedVersion = "";
     private string _latestVersion = "";
     private bool _hasUpdate;
-    private bool _isBusy;
+    private bool _isBusy = true;
     private string _statusMessage = "";
     private string _executablePath = "";
     private string _usageCheckCommand = "";
@@ -117,11 +117,25 @@ public class CliInfo : ViewModelBase
     {
         get
         {
-            if (IsBusy) return "処理中...";
+            if (IsBusy) return "確認中...";
             if (!IsSubscribed) return "未契約";
             if (!IsInstalled) return "未導入";
             if (HasUpdate) return "更新あり";
             return "最新";
         }
+    }
+
+    public void CopyFrom(CliInfo other)
+    {
+        IsInstalled = other.IsInstalled;
+        InstalledVersion = other.InstalledVersion;
+        LatestVersion = other.LatestVersion;
+        HasUpdate = other.HasUpdate;
+        ExecutablePath = other.ExecutablePath;
+        if (IsSubscribed)
+        {
+            StatusMessage = other.StatusMessage;
+        }
+        IsBusy = false;
     }
 }

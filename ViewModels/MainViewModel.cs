@@ -201,14 +201,44 @@ public class MainViewModel : ViewModelBase
 
         try
         {
-            // 1. LanguageServer からリアルタイム生クォータを取得して各サービスに反映
-            await _usageFetcher.FetchAllUsagesAsync(Items);
+            // 全カードのバッジを「確認中...」にしておく
+            foreach (var item in Items)
+            {
+                item.CliInfo.IsBusy = true;
+            }
 
-            // 2. CLI のステータス・バージョンを並列チェック
-            var cliTasks = Items
-                .Select(item => _cliManager.CheckCliStatusAsync(item.CliInfo));
+            // 1. 各カードのCLIチェック用の一時CliInfoを用意して並列実行
+            // （画面上のCliInfoを直接更新しないため、個別完了時にバッジがバラバラ変わらない）
+            var cliTasks = Items.Select(async item =>
+            {
+                var tempCli = new CliInfo
+                {
+                    Name = item.CliInfo.Name,
+                    CommandName = item.CliInfo.CommandName,
+                    PackageName = item.CliInfo.PackageName,
+                    UsageCheckCommand = item.CliInfo.UsageCheckCommand,
+                    IsSubscribed = item.CliInfo.IsSubscribed
+                };
+                await _cliManager.CheckCliStatusAsync(tempCli);
+                return (Item: item, TempCli: tempCli);
+            }).ToList();
 
-            await Task.WhenAll(cliTasks);
+            // 2. 利用状況（クォータ）生データをバックグラウンドで並列取得
+            var usageTask = _usageFetcher.FetchAllRawDataAsync();
+
+            // 3. 利用状況取得と全CLIチェックが「すべて完了」するまで待機
+            await Task.WhenAll(usageTask, Task.WhenAll(cliTasks));
+
+            // 4. 【全て確認完了】この瞬間に全カードへ一斉にデータを反映する！
+            var cliResults = await Task.WhenAll(cliTasks);
+            foreach (var res in cliResults)
+            {
+                // クォータデータ反映（%・リング・リセット日時・枠線判定）
+                _usageFetcher.ApplyUsage(res.Item);
+
+                // CLIステータス反映（最新・未契約・未導入等のバッジ）
+                res.Item.CliInfo.CopyFrom(res.TempCli);
+            }
 
             StatusText = $"同期完了: {DateTime.Now:HH:mm:ss}";
         }

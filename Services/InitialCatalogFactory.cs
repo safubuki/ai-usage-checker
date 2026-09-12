@@ -27,20 +27,23 @@ public static class InitialCatalogFactory
                     Name = "Codex",
                     CommandName = "codex",
                     PackageName = "@openai/codex",
-                    UsageCheckCommand = "/status"
+                    UsageCheckCommand = "/status",
+                    StatusMessage = "利用状況を確認中..."
                 },
                 PrimaryLimit = new UsageLimitInfo
                 {
                     Title = "5時間制限",
                     RemainingPercent = 0.0,
-                    LimitDescription = "5h limit",
+                    CustomDisplayPercentText = "--",
+                    LimitDescription = "取得中...",
                     ResetTimeText = "取得中..."
                 },
                 SecondaryLimit = new UsageLimitInfo
                 {
                     Title = "週次制限",
-                    RemainingPercent = 52.0,
-                    LimitDescription = "Weekly limit",
+                    RemainingPercent = 0.0,
+                    CustomDisplayPercentText = "--",
+                    LimitDescription = "取得中...",
                     ResetTimeText = "取得中..."
                 }
             },
@@ -58,17 +61,15 @@ public static class InitialCatalogFactory
                     CommandName = "claude",
                     PackageName = "@anthropic-ai/claude-code",
                     UsageCheckCommand = "/usage (/cost, /stats)",
-                    IsSubscribed = false,
-                    IsInstalled = false,
-                    StatusMessage = "未契約 (プラン未加入)"
+                    StatusMessage = "利用状況を確認中..."
                 },
                 PrimaryLimit = new UsageLimitInfo
                 {
                     Title = "契約状況",
                     RemainingPercent = 0.0,
                     CustomDisplayPercentText = "--",
-                    LimitDescription = "Anthropic Claude 未契約",
-                    ResetTimeText = "未契約"
+                    LimitDescription = "取得中...",
+                    ResetTimeText = "取得中..."
                 },
                 SecondaryLimit = null
             },
@@ -85,20 +86,23 @@ public static class InitialCatalogFactory
                     Name = "Gemini",
                     CommandName = "gemini",
                     PackageName = "@google/gemini-cli",
-                    UsageCheckCommand = "/usage (agy status)"
+                    UsageCheckCommand = "/usage (agy status)",
+                    StatusMessage = "利用状況を確認中..."
                 },
                 PrimaryLimit = new UsageLimitInfo
                 {
                     Title = "5時間制限",
-                    RemainingPercent = 81.0,
-                    LimitDescription = "Five Hour Limit Remaining",
-                    ResetTimeText = $"{DateTime.Now.AddHours(4).AddMinutes(5):HH:mm} リセット"
+                    RemainingPercent = 0.0,
+                    CustomDisplayPercentText = "--",
+                    LimitDescription = "取得中...",
+                    ResetTimeText = "取得中..."
                 },
                 SecondaryLimit = new UsageLimitInfo
                 {
                     Title = "週次制限",
-                    RemainingPercent = 74.0,
-                    LimitDescription = "Weekly Limit Remaining",
+                    RemainingPercent = 0.0,
+                    CustomDisplayPercentText = "--",
+                    LimitDescription = "取得中...",
                     ResetTimeText = "取得中..."
                 }
             },
@@ -115,13 +119,15 @@ public static class InitialCatalogFactory
                     Name = "Grok",
                     CommandName = "grok",
                     PackageName = "grok",
-                    UsageCheckCommand = "/usage"
+                    UsageCheckCommand = "/usage",
+                    StatusMessage = "利用状況を確認中..."
                 },
                 PrimaryLimit = new UsageLimitInfo
                 {
                     Title = "週次制限",
-                    RemainingPercent = 100.0,
-                    LimitDescription = "Weekly limit (SuperGrok)",
+                    RemainingPercent = 0.0,
+                    CustomDisplayPercentText = "--",
+                    LimitDescription = "取得中...",
                     ResetTimeText = "取得中..."
                 },
                 SecondaryLimit = null
@@ -140,14 +146,14 @@ public static class InitialCatalogFactory
                     CommandName = "copilot",
                     PackageName = "@github/copilot",
                     UsageCheckCommand = "/usage (/limits)",
-                    IsSubscribed = true,
-                    StatusMessage = "プラン: Copilot Pro (稼働中)"
+                    StatusMessage = "利用状況を確認中..."
                 },
                 PrimaryLimit = new UsageLimitInfo
                 {
                     Title = "プレミアム要求",
-                    RemainingPercent = 98.0,
-                    LimitDescription = "2% 使用済み",
+                    RemainingPercent = 0.0,
+                    CustomDisplayPercentText = "--",
+                    LimitDescription = "取得中...",
                     ResetTimeText = "取得中..."
                 },
                 SecondaryLimit = null
@@ -173,6 +179,11 @@ public static class InitialCatalogFactory
             {
                 ordered.Add(item);
             }
+        }
+
+        foreach (var item in ordered)
+        {
+            item.UpdateStatusAndCheckRecovery();
         }
 
         return new ObservableCollection<AiUsageItem>(ordered);

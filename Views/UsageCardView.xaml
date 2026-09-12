@@ -17,14 +17,15 @@
     <Grid Cursor="Hand">
         <!-- ベースカード枠 -->
         <Border x:Name="CardBase"
-                Background="#1E2322" 
-                BorderBrush="#2D3834" 
-                BorderThickness="1" 
                 CornerRadius="8" 
                 Padding="8,9"
                 MinHeight="136">
             <Border.Style>
                 <Style TargetType="Border">
+                    <!-- デフォルトスタイル (ローカル値ではなくSetterで定義することでTriggersによる上書きを保証) -->
+                    <Setter Property="Background" Value="#1E2322"/>
+                    <Setter Property="BorderBrush" Value="#2D3834"/>
+                    <Setter Property="BorderThickness" Value="1"/>
                     <Setter Property="RenderTransformOrigin" Value="0.5, 0.5"/>
                     <Setter Property="RenderTransform">
                         <Setter.Value>
@@ -43,13 +44,40 @@
                             <Setter Property="Background" Value="#232B29"/>
                         </Trigger>
 
-                        <!-- 要望1: 週次制限枯渇時のダークレッド枠＋ぼかし光彩 -->
-                        <DataTrigger Binding="{Binding IsWeeklyExhausted}" Value="True">
-                            <Setter Property="BorderBrush" Value="#EF4444"/>
-                            <Setter Property="Background" Value="#241B1B"/>
+                        <!-- 5時間制限枯渇時: 上品で視認性の高いアンバーゴールド枠＋光彩 -->
+                        <DataTrigger Binding="{Binding IsFiveHourExhausted}" Value="True">
+                            <Setter Property="BorderBrush" Value="#FACC15"/>
+                            <Setter Property="BorderThickness" Value="1.5"/>
+                            <Setter Property="Background">
+                                <Setter.Value>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#332B16" Offset="0.0"/>
+                                        <GradientStop Color="#231F12" Offset="1.0"/>
+                                    </LinearGradientBrush>
+                                </Setter.Value>
+                            </Setter>
                             <Setter Property="Effect">
                                 <Setter.Value>
-                                    <DropShadowEffect Color="#DC2626" BlurRadius="12" ShadowDepth="0" Opacity="0.65"/>
+                                    <DropShadowEffect Color="#F59E0B" BlurRadius="12" ShadowDepth="0" Opacity="0.80"/>
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+
+                        <!-- 週次制限枯渇時: 落ち着いたダークディープレッド枠＋薄赤グラデーション＋ほのかなグロー (最優先) -->
+                        <DataTrigger Binding="{Binding IsWeeklyExhausted}" Value="True">
+                            <Setter Property="BorderBrush" Value="#B91C1C"/>
+                            <Setter Property="BorderThickness" Value="1.5"/>
+                            <Setter Property="Background">
+                                <Setter.Value>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#461E24" Offset="0.0"/>
+                                        <GradientStop Color="#2C1418" Offset="1.0"/>
+                                    </LinearGradientBrush>
+                                </Setter.Value>
+                            </Setter>
+                            <Setter Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#991B1B" BlurRadius="8" ShadowDepth="0" Opacity="0.40"/>
                                 </Setter.Value>
                             </Setter>
                         </DataTrigger>
@@ -229,8 +257,13 @@
             <Border.Style>
                 <Style TargetType="Border">
                     <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsRecoveredGlowActive}" Value="True">
-                            <DataTrigger.EnterActions>
+                        <!-- 0%から100%回復時のホタル点滅: 週次枯渇(赤枠)を最優先とし、週次制限中(IsWeeklyExhausted=True)は表示しない -->
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding IsRecoveredGlowActive}" Value="True"/>
+                                <Condition Binding="{Binding IsWeeklyExhausted}" Value="False"/>
+                            </MultiDataTrigger.Conditions>
+                            <MultiDataTrigger.EnterActions>
                                 <BeginStoryboard Name="BreatheStoryboard">
                                     <Storyboard RepeatBehavior="Forever" AutoReverse="True">
                                         <DoubleAnimation Storyboard.TargetProperty="Opacity"
@@ -241,11 +274,11 @@
                                         </DoubleAnimation>
                                     </Storyboard>
                                 </BeginStoryboard>
-                            </DataTrigger.EnterActions>
-                            <DataTrigger.ExitActions>
+                            </MultiDataTrigger.EnterActions>
+                            <MultiDataTrigger.ExitActions>
                                 <StopStoryboard BeginStoryboardName="BreatheStoryboard"/>
-                            </DataTrigger.ExitActions>
-                        </DataTrigger>
+                            </MultiDataTrigger.ExitActions>
+                        </MultiDataTrigger>
                     </Style.Triggers>
                 </Style>
             </Border.Style>

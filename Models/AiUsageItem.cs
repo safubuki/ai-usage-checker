@@ -16,15 +16,36 @@ public class AiUsageItem : ViewModelBase
     private int _displayOrder;
     private bool _isSelected;
     private DateTime _lastRefreshed = DateTime.Now;
+    private bool _isDataLoaded;
     private bool _isWeeklyExhausted;
+    private bool _isFiveHourExhausted;
+    private bool _hasFiveHourLimit;
     private bool _isRecoveredGlowActive;
     private double? _prevPrimaryPercent;
     private double? _prevSecondaryPercent;
+
+    public bool IsDataLoaded
+    {
+        get => _isDataLoaded;
+        set => SetProperty(ref _isDataLoaded, value);
+    }
 
     public bool IsWeeklyExhausted
     {
         get => _isWeeklyExhausted;
         set => SetProperty(ref _isWeeklyExhausted, value);
+    }
+
+    public bool IsFiveHourExhausted
+    {
+        get => _isFiveHourExhausted;
+        set => SetProperty(ref _isFiveHourExhausted, value);
+    }
+
+    public bool HasFiveHourLimit
+    {
+        get => _hasFiveHourLimit;
+        set => SetProperty(ref _hasFiveHourLimit, value);
     }
 
     public bool IsRecoveredGlowActive
@@ -43,6 +64,15 @@ public class AiUsageItem : ViewModelBase
 
     public void UpdateStatusAndCheckRecovery()
     {
+        // データロード前は警告枠（赤枠・黄色枠）や回復緑枠を表示しない
+        if (!IsDataLoaded)
+        {
+            IsWeeklyExhausted = false;
+            IsFiveHourExhausted = false;
+            IsRecoveredGlowActive = false;
+            return;
+        }
+
         // 週次制限の枯渇判定 (SecondaryLimit または 週次制限のPrimaryLimit)
         bool weeklyExhausted = false;
         if (SecondaryLimit != null && SecondaryLimit.Title.Contains("週次"))
@@ -55,21 +85,37 @@ public class AiUsageItem : ViewModelBase
         }
         IsWeeklyExhausted = weeklyExhausted;
 
-        // 0% -> 100% 回復時のホタル点滅判定
+        // 5時間制限の有無および枯渇判定
+        bool hasFiveHour = false;
+        bool fiveHourExhausted = false;
+        if (PrimaryLimit.Title.Contains("5時間"))
+        {
+            hasFiveHour = true;
+            fiveHourExhausted = PrimaryLimit.RemainingPercent <= 0.0;
+        }
+        else if (SecondaryLimit != null && SecondaryLimit.Title.Contains("5時間"))
+        {
+            hasFiveHour = true;
+            fiveHourExhausted = SecondaryLimit.RemainingPercent <= 0.0;
+        }
+        HasFiveHourLimit = hasFiveHour;
+        IsFiveHourExhausted = fiveHourExhausted;
+
+        // 0% -> 100% 回復時のホタル点滅判定 (週次制限枯渇時はAIが利用不可のため回復緑枠は出さない)
         double currPrimary = PrimaryLimit.RemainingPercent;
         double? currSecondary = SecondaryLimit?.RemainingPercent;
 
         bool primaryRecovered = _prevPrimaryPercent.HasValue && _prevPrimaryPercent.Value <= 0.0 && currPrimary >= 100.0;
         bool secondaryRecovered = _prevSecondaryPercent.HasValue && _prevSecondaryPercent.Value <= 0.0 && (currSecondary.HasValue && currSecondary.Value >= 100.0);
 
-        if (primaryRecovered || secondaryRecovered)
+        if ((primaryRecovered || secondaryRecovered) && !IsWeeklyExhausted)
         {
             IsRecoveredGlowActive = true;
         }
         else if (IsRecoveredGlowActive)
         {
-            // 使用によって100%未満になった場合は点滅解除
-            if (currPrimary < 100.0 || (currSecondary.HasValue && currSecondary.Value < 100.0))
+            // 週次制限枯渇時、または使用によって100%未満になった場合は点滅解除
+            if (IsWeeklyExhausted || currPrimary < 100.0 || (currSecondary.HasValue && currSecondary.Value < 100.0))
             {
                 IsRecoveredGlowActive = false;
             }
