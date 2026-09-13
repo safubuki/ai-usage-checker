@@ -8,6 +8,7 @@ namespace AIUsageChecker.Services;
 public class CopilotQuotaData
 {
     public bool IsSuccess { get; set; }
+    public bool IsAuthRequired { get; set; }
     public string PlanName { get; set; } = "Copilot Pro";
     public string QuotaTitle { get; set; } = "プレミアム要求";
     public string UnitName { get; set; } = "要求";
@@ -23,6 +24,30 @@ public class CopilotQuotaData
 public class CopilotQuotaClient
 {
     public event Action<string>? LogOutputReceived;
+
+    public static bool IsGhAuth()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "gh",
+                Arguments = "auth status",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = Process.Start(psi);
+            if (proc == null) return false;
+            proc.WaitForExit(2500);
+            return proc.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     public async Task<CopilotQuotaData?> FetchCopilotQuotaAsync()
     {
@@ -44,7 +69,7 @@ public class CopilotQuotaClient
             if (proc == null)
             {
                 LogOutputReceived?.Invoke("[Copilot] gh プロセスの起動に失敗しました");
-                return null;
+                return new CopilotQuotaData { IsSuccess = false, IsAuthRequired = true };
             }
 
             var outputTask = proc.StandardOutput.ReadToEndAsync();
@@ -56,8 +81,11 @@ public class CopilotQuotaClient
 
             if (proc.ExitCode != 0 || string.IsNullOrWhiteSpace(json))
             {
-                LogOutputReceived?.Invoke($"[Copilot] gh api 失敗 (Code {proc.ExitCode}): {error}");
-                return null;
+                bool isAuthErr = error.Contains("auth", StringComparison.OrdinalIgnoreCase) ||
+                                 error.Contains("logged in", StringComparison.OrdinalIgnoreCase) ||
+                                 error.Contains("401") || error.Contains("token", StringComparison.OrdinalIgnoreCase);
+                LogOutputReceived?.Invoke($"[Copilot] gh api 失敗 (Code {proc.ExitCode}): {error.Trim()}");
+                return new CopilotQuotaData { IsSuccess = false, IsAuthRequired = isAuthErr };
             }
 
             using var doc = JsonDocument.Parse(json);

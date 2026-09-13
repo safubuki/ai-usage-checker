@@ -12,6 +12,7 @@ namespace AIUsageChecker.Services;
 public class GrokQuotaData
 {
     public bool IsSuccess { get; set; }
+    public bool IsAuthRequired { get; set; }
     public string PlanName { get; set; } = "SuperGrok";
     public double UsedPercent { get; set; }
     public double RemainingPercent { get; set; } = 100.0;
@@ -30,17 +31,29 @@ public class GrokQuotaClient
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(6) };
     public event Action<string>? LogOutputReceived;
 
+    public static string GetAuthFilePath()
+    {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(userProfile, ".grok", "auth.json");
+    }
+
+    public static bool IsAuthFileExists()
+    {
+        return File.Exists(GetAuthFilePath());
+    }
+
     public async Task<GrokQuotaData?> FetchGrokQuotaAsync()
     {
         try
         {
-            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var authFilePath = Path.Combine(userProfile, ".grok", "auth.json");
+            var authFilePath = GetAuthFilePath();
 
             if (!File.Exists(authFilePath))
             {
                 LogOutputReceived?.Invoke("[Grok] ~/.grok/auth.json が見つかりません（未ログインまたはGrok CLI未インストール）");
-                return TryFallbackFromLog();
+                var fallback = TryFallbackFromLog();
+                if (fallback != null) return fallback;
+                return new GrokQuotaData { IsSuccess = false, IsAuthRequired = true, ErrorMessage = "未ログイン ('grok' ログインが必要)" };
             }
 
             var authJson = await File.ReadAllTextAsync(authFilePath);

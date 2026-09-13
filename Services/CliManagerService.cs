@@ -68,10 +68,53 @@ public class CliManagerService
                 {
                     cli.StatusMessage = "最新バージョン確認完了";
                 }
+
+                // 各AIツールのログイン状態の確認
+                if (cli.CommandName.Equals("codex", StringComparison.OrdinalIgnoreCase))
+                {
+                    cli.IsLoggedIn = CodexQuotaClient.IsAuthFileExists();
+                    if (!cli.IsLoggedIn)
+                    {
+                        cli.StatusMessage = "未ログイン ('codex login' が必要)";
+                        Log($"{cli.Name} は未ログイン状態です (~/.codex/auth.json 未検出)");
+                    }
+                }
+                else if (cli.CommandName.Equals("claude", StringComparison.OrdinalIgnoreCase))
+                {
+                    cli.IsLoggedIn = ClaudeQuotaClient.IsConfigExists();
+                    if (!cli.IsLoggedIn)
+                    {
+                        cli.StatusMessage = "未ログイン ('claude login' が必要)";
+                        Log($"{cli.Name} は未ログイン状態です (~/.claude.json 未検出)");
+                    }
+                }
+                else if (cli.CommandName.Equals("grok", StringComparison.OrdinalIgnoreCase))
+                {
+                    cli.IsLoggedIn = GrokQuotaClient.IsAuthFileExists();
+                    if (!cli.IsLoggedIn)
+                    {
+                        cli.StatusMessage = "未ログイン ('grok' 認証が必要)";
+                        Log($"{cli.Name} は未ログイン状態です (~/.grok/auth.json 未検出)");
+                    }
+                }
+                else if (cli.CommandName.Equals("copilot", StringComparison.OrdinalIgnoreCase))
+                {
+                    cli.IsLoggedIn = CopilotQuotaClient.IsGhAuth();
+                    if (!cli.IsLoggedIn)
+                    {
+                        cli.StatusMessage = "未ログイン ('gh auth login' が必要)";
+                        Log($"{cli.Name} は未ログイン状態です ('gh auth status' 未認証)");
+                    }
+                }
+                else if (cli.CommandName.Equals("gemini", StringComparison.OrdinalIgnoreCase))
+                {
+                    cli.IsLoggedIn = true;
+                }
             }
             else
             {
                 cli.IsInstalled = false;
+                cli.IsLoggedIn = false;
                 cli.InstalledVersion = "";
                 cli.ExecutablePath = "";
                 cli.HasUpdate = false;
@@ -90,6 +133,141 @@ public class CliManagerService
         {
             cli.StatusMessage = $"確認失敗: {ex.Message}";
             Log($"{cli.Name} の確認中にエラー: {ex.Message}");
+        }
+        finally
+        {
+            cli.IsBusy = false;
+        }
+    }
+
+    public async Task<bool> LoginCliAsync(CliInfo cli)
+    {
+        cli.IsBusy = true;
+        cli.StatusMessage = "ログイン認証を開始中...";
+        Log($"=== {cli.Name} のログイン認証を開始します ===");
+
+        try
+        {
+            if (cli.CommandName.Equals("codex", StringComparison.OrdinalIgnoreCase))
+            {
+                Log("[Codex] ブラウザでChatGPT認証画面を開きます。承認を完了してください...");
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = "/c start \"Codex Login\" cmd.exe /k \"codex login\"",
+                    UseShellExecute = true
+                };
+                Process.Start(psi);
+
+                // 最大60秒間、auth.json の生成をポーリング検知
+                for (int i = 0; i < 60; i++)
+                {
+                    await Task.Delay(1000);
+                    if (CodexQuotaClient.IsAuthFileExists())
+                    {
+                        Log("[Codex] ログイン認証の完了を検知しました！");
+                        cli.IsLoggedIn = true;
+                        cli.StatusMessage = "ログイン完了";
+                        return true;
+                    }
+                }
+
+                Log("[Codex] ログイン待機がタイムアウトしました。ブラウザまたは開いたコンソールウィンドウで認証を完了してください。");
+                cli.StatusMessage = "ログイン待機タイムアウト (要確認)";
+                return false;
+            }
+            else if (cli.CommandName.Equals("claude", StringComparison.OrdinalIgnoreCase))
+            {
+                Log("[Claude] ブラウザでAnthropic認証画面を開きます。承認を完了してください...");
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = "/c start \"Claude Login\" cmd.exe /k \"claude login\"",
+                    UseShellExecute = true
+                };
+                Process.Start(psi);
+
+                for (int i = 0; i < 60; i++)
+                {
+                    await Task.Delay(1000);
+                    if (ClaudeQuotaClient.IsConfigExists())
+                    {
+                        Log("[Claude] ログイン認証の完了を検知しました！");
+                        cli.IsLoggedIn = true;
+                        cli.StatusMessage = "ログイン完了";
+                        return true;
+                    }
+                }
+                return true;
+            }
+            else if (cli.CommandName.Equals("grok", StringComparison.OrdinalIgnoreCase))
+            {
+                Log("[Grok] xAI認証コンソールを起動します...");
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = "/c start \"Grok Login\" cmd.exe /k \"grok auth login\"",
+                    UseShellExecute = true
+                };
+                Process.Start(psi);
+
+                for (int i = 0; i < 60; i++)
+                {
+                    await Task.Delay(1000);
+                    if (GrokQuotaClient.IsAuthFileExists())
+                    {
+                        Log("[Grok] ログイン認証の完了を検知しました！");
+                        cli.IsLoggedIn = true;
+                        cli.StatusMessage = "ログイン完了";
+                        return true;
+                    }
+                }
+                return true;
+            }
+            else if (cli.CommandName.Equals("copilot", StringComparison.OrdinalIgnoreCase))
+            {
+                Log("[Copilot] GitHub認証コンソールを起動します (ブラウザで認証)...");
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = "/c start \"GitHub Login\" cmd.exe /k \"gh auth login -w -p https\"",
+                    UseShellExecute = true
+                };
+                Process.Start(psi);
+
+                for (int i = 0; i < 60; i++)
+                {
+                    await Task.Delay(1500);
+                    if (CopilotQuotaClient.IsGhAuth())
+                    {
+                        Log("[Copilot] GitHubログイン認証の完了を検知しました！");
+                        cli.IsLoggedIn = true;
+                        cli.StatusMessage = "ログイン完了";
+                        return true;
+                    }
+                }
+                return true;
+            }
+            else if (cli.CommandName.Equals("gemini", StringComparison.OrdinalIgnoreCase))
+            {
+                Log("[Gemini] Gemini認証コンソールを起動します...");
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = "/c start \"Gemini Login\" cmd.exe /k \"gemini login\"",
+                    UseShellExecute = true
+                };
+                Process.Start(psi);
+                return true;
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            cli.StatusMessage = $"ログイン起動失敗: {ex.Message}";
+            Log($"[エラー] {cli.Name} のログイン起動中にエラー: {ex.Message}");
+            return false;
         }
         finally
         {

@@ -170,6 +170,37 @@
                                     </Button.Resources>
                                 </Button>
 
+                                <!-- 未ログイン時 (インストール済み): ログインボタン -->
+                                <Button Content="{Binding SelectedItem.LoginButtonText}" 
+                                        FontSize="9.5" FontWeight="Bold"
+                                        Padding="8,3" Margin="0,0,6,0"
+                                        Background="#10B981" Foreground="#FFFFFF"
+                                        BorderThickness="0"
+                                        Command="{Binding LoginCliCommand}"
+                                        CommandParameter="{Binding SelectedItem}"
+                                        ToolTip="ブラウザまたはコンソールで認証画面を開き、利用枠データを連携します"
+                                        Cursor="Hand">
+                                    <Button.Style>
+                                        <Style TargetType="Button">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding SelectedItem.CliInfo.IsInstalled}" Value="True"/>
+                                                        <Condition Binding="{Binding SelectedItem.CliInfo.IsLoggedIn}" Value="False"/>
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                    <Button.Resources>
+                                        <Style TargetType="Border">
+                                            <Setter Property="CornerRadius" Value="4"/>
+                                        </Style>
+                                    </Button.Resources>
+                                </Button>
+
                                 <!-- 更新あり時: 最新アップデートボタン -->
                                 <Button Content="🚀 最新バージョンに更新" 
                                         FontSize="9.5" FontWeight="Bold"

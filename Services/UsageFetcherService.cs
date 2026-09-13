@@ -58,7 +58,17 @@ public class UsageFetcherService
         {
             try
             {
-                _lastCodexData = await _codexClient.FetchCodexQuotaAsync();
+                var data = await _codexClient.FetchCodexQuotaAsync();
+                if (data != null && data.IsSuccess)
+                {
+                    _lastCodexData = data;
+                    SaveCache();
+                }
+                else if (data != null && data.IsAuthRequired)
+                {
+                    // 認証切れ・未ログインが判明した場合はキャッシュに頼らず未ログイン状態を設定
+                    _lastCodexData = data;
+                }
             }
             catch (Exception ex)
             {
@@ -71,6 +81,10 @@ public class UsageFetcherService
             try
             {
                 _lastClaudeData = await _claudeClient.FetchClaudeQuotaAsync();
+                if (_lastClaudeData?.IsSubscribed == true)
+                {
+                    SaveCache();
+                }
             }
             catch (Exception ex)
             {
@@ -86,7 +100,7 @@ public class UsageFetcherService
                 if (groups != null && groups.Count > 0)
                 {
                     _cachedGroups = groups;
-                    SaveCache(groups);
+                    SaveCache();
                 }
             }
             catch (Exception ex)
@@ -100,6 +114,10 @@ public class UsageFetcherService
             try
             {
                 _lastCopilotData = await _copilotClient.FetchCopilotQuotaAsync();
+                if (_lastCopilotData?.IsSuccess == true)
+                {
+                    SaveCache();
+                }
             }
             catch (Exception ex)
             {
@@ -112,6 +130,10 @@ public class UsageFetcherService
             try
             {
                 _lastGrokData = await _grokClient.FetchGrokQuotaAsync();
+                if (_lastGrokData?.IsSuccess == true)
+                {
+                    SaveCache();
+                }
             }
             catch (Exception ex)
             {
@@ -241,30 +263,29 @@ public class UsageFetcherService
         }
         else
         {
-            // フォールバック（端末実データ準拠）
+            // 未ログインまたは取得失敗（偽のハードコードサンプル値を撤廃）
+            bool isAuthIssue = _lastCodexData != null && _lastCodexData.IsAuthRequired;
+            item.CliInfo.IsLoggedIn = !isAuthIssue && CodexQuotaClient.IsAuthFileExists();
+            item.CliInfo.StatusMessage = item.CliInfo.IsLoggedIn 
+                ? "ChatGPT接続待機中 (通信エラー)" 
+                : "未ログイン ('codex login' が必要)";
+
             item.PrimaryLimit.Title = "5時間制限";
-            item.PrimaryLimit.LimitDescription = "5h limit (resets 18:21)";
+            item.PrimaryLimit.LimitDescription = item.CliInfo.IsLoggedIn ? "接続待機中..." : "未ログイン ('codex login' で連携)";
             item.PrimaryLimit.RemainingPercent = 0.0;
-            item.PrimaryLimit.CustomDisplayPercentText = null;
-            item.PrimaryLimit.ResetTimeText = "18:21 リセット (枯渇)";
+            item.PrimaryLimit.CustomDisplayPercentText = "--";
+            item.PrimaryLimit.ResetTimeText = item.CliInfo.IsLoggedIn ? "取得待機" : "要ログイン";
 
             if (item.SecondaryLimit == null) item.SecondaryLimit = new UsageLimitInfo();
             item.SecondaryLimit.Title = "週次制限";
-            item.SecondaryLimit.LimitDescription = "Weekly limit (resets 13:15 on 15 Sep)";
-            item.SecondaryLimit.RemainingPercent = 52.0;
-            item.SecondaryLimit.CustomDisplayPercentText = null;
-            item.SecondaryLimit.ResetTimeText = "09/15 13:15 リセット";
+            item.SecondaryLimit.LimitDescription = item.CliInfo.IsLoggedIn ? "接続待機中..." : "未ログイン ('codex login' で連携)";
+            item.SecondaryLimit.RemainingPercent = 0.0;
+            item.SecondaryLimit.CustomDisplayPercentText = "--";
+            item.SecondaryLimit.ResetTimeText = item.CliInfo.IsLoggedIn ? "取得待機" : "要ログイン";
 
             item.AllLimits.Clear();
             item.AllLimits.Add(item.PrimaryLimit);
             item.AllLimits.Add(item.SecondaryLimit);
-            item.AllLimits.Add(new UsageLimitInfo
-            {
-                Title = "予備週次枠",
-                LimitDescription = "gpt-reserve Weekly limit",
-                RemainingPercent = 100.0,
-                ResetTimeText = "09/16 16:19 リセット"
-            });
         }
     }
 
@@ -324,20 +345,31 @@ public class UsageFetcherService
         }
         else
         {
-            // 未契約（現在の状態）
+            // 未契約または未ログイン
+            bool isConfigExists = ClaudeQuotaClient.IsConfigExists();
+            item.CliInfo.IsLoggedIn = isConfigExists;
+            item.CliInfo.IsSubscribed = false;
+
             item.PrimaryLimit.Title = "契約ステータス";
-            item.PrimaryLimit.LimitDescription = "Anthropic Claude 未契約 (プラン未加入)";
             item.PrimaryLimit.RemainingPercent = 0.0;
             item.PrimaryLimit.CustomDisplayPercentText = "--";
-            item.PrimaryLimit.ResetTimeText = "未契約";
+
+            if (!isConfigExists)
+            {
+                item.PrimaryLimit.LimitDescription = "Claude 未ログイン ('claude login' で連携)";
+                item.PrimaryLimit.ResetTimeText = "要ログイン";
+                item.CliInfo.StatusMessage = "未ログイン ('claude login' が必要)";
+            }
+            else
+            {
+                item.PrimaryLimit.LimitDescription = "Anthropic Claude 未契約 (プラン未加入)";
+                item.PrimaryLimit.ResetTimeText = "未契約";
+                item.CliInfo.StatusMessage = "未契約 (プラン未加入)";
+            }
 
             item.SecondaryLimit = null;
             item.AllLimits.Clear();
             item.AllLimits.Add(item.PrimaryLimit);
-
-            item.CliInfo.IsSubscribed = false;
-            item.CliInfo.IsInstalled = false;
-            item.CliInfo.StatusMessage = "未契約 (プラン未加入)";
         }
     }
 
@@ -368,22 +400,29 @@ public class UsageFetcherService
                 item.SecondaryLimit.ResetTimeText = FormatResetTime(weeklyBucket.ResetTime, "リセット");
             }
 
+            item.CliInfo.IsLoggedIn = true;
+            item.CliInfo.IsSubscribed = true;
+            item.CliInfo.StatusMessage = "Google DeepMind 連携稼働中";
             LogOutputReceived?.Invoke($"[Gemini] Antigravity 言語サーバーより取得: 5h枠={item.PrimaryLimit.RemainingPercent:F0}%, 週次枠={item.SecondaryLimit?.RemainingPercent:F0}%");
         }
         else
         {
+            // 言語サーバー未接続または未ログイン時（偽のハードコードフォールバックを撤廃）
             item.PrimaryLimit.Title = "5時間制限";
-            item.PrimaryLimit.LimitDescription = "Five Hour Limit Remaining";
-            item.PrimaryLimit.RemainingPercent = 81.0;
-            item.PrimaryLimit.CustomDisplayPercentText = null;
-            item.PrimaryLimit.ResetTimeText = $"{DateTime.Now.AddHours(4).AddMinutes(5):HH:mm} リセット";
+            item.PrimaryLimit.LimitDescription = "Antigravity 言語サーバー接続待機中";
+            item.PrimaryLimit.RemainingPercent = 0.0;
+            item.PrimaryLimit.CustomDisplayPercentText = "--";
+            item.PrimaryLimit.ResetTimeText = "待機中";
 
             if (item.SecondaryLimit == null) item.SecondaryLimit = new UsageLimitInfo();
             item.SecondaryLimit.Title = "週次制限";
-            item.SecondaryLimit.LimitDescription = "Weekly Limit Remaining";
-            item.SecondaryLimit.RemainingPercent = 74.0;
-            item.SecondaryLimit.CustomDisplayPercentText = null;
-            item.SecondaryLimit.ResetTimeText = "09/11 23:46 リセット";
+            item.SecondaryLimit.LimitDescription = "Antigravity 言語サーバー接続待機中";
+            item.SecondaryLimit.RemainingPercent = 0.0;
+            item.SecondaryLimit.CustomDisplayPercentText = "--";
+            item.SecondaryLimit.ResetTimeText = "待機中";
+
+            item.CliInfo.IsLoggedIn = true;
+            item.CliInfo.StatusMessage = "Antigravity 接続待機中";
         }
 
         item.AllLimits.Clear();
@@ -411,6 +450,7 @@ public class UsageFetcherService
             }
             item.PrimaryLimit.LimitDescription = $"{_lastGrokData.UsedPercent:F0}% 使用済み (残 {_lastGrokData.RemainingPercent:F0}%){breakdown}";
 
+            item.CliInfo.IsLoggedIn = true;
             item.CliInfo.IsSubscribed = true;
             item.CliInfo.StatusMessage = $"プラン: {_lastGrokData.PlanName} ({_lastGrokData.UsedPercent:F0}% 使用済)";
 
@@ -446,41 +486,23 @@ public class UsageFetcherService
         }
         else
         {
-            // フォールバック（ユーザー様環境準拠: 8%使用済・残92%）
-            item.PrimaryLimit.Title = "週次制限";
-            item.PrimaryLimit.LimitDescription = "8% 使用済み (残 92%) [Build: 7%, Chat: 1%]";
-            item.PrimaryLimit.RemainingPercent = 92.0;
-            item.PrimaryLimit.ResetTimeText = "09/15 21:53 リセット";
-            item.PrimaryLimit.CustomDisplayPercentText = null;
+            // 未ログインまたは取得失敗（偽のハードコードフォールバックを撤廃）
+            bool isLoggedIn = GrokQuotaClient.IsAuthFileExists();
+            item.CliInfo.IsLoggedIn = isLoggedIn;
+            item.CliInfo.IsSubscribed = isLoggedIn;
+            item.CliInfo.StatusMessage = isLoggedIn 
+                ? "xAI 接続待機中 (通信エラー)" 
+                : "未ログイン ('grok' 認証が必要)";
 
-            item.CliInfo.IsSubscribed = true;
-            item.CliInfo.StatusMessage = "プラン: SuperGrok (8% 使用済)";
+            item.PrimaryLimit.Title = "週次制限";
+            item.PrimaryLimit.LimitDescription = isLoggedIn ? "接続待機中..." : "未ログイン ('grok' で連携)";
+            item.PrimaryLimit.RemainingPercent = 0.0;
+            item.PrimaryLimit.CustomDisplayPercentText = "--";
+            item.PrimaryLimit.ResetTimeText = isLoggedIn ? "取得待機" : "要ログイン";
 
             item.SecondaryLimit = null;
             item.AllLimits.Clear();
             item.AllLimits.Add(item.PrimaryLimit);
-
-            var buildLimit = new UsageLimitInfo
-            {
-                Title = "Grok Build",
-                RemainingPercent = 93.0,
-                LimitDescription = "7% 使用",
-                ResetTimeText = "09/15 21:53 リセット"
-            };
-            buildLimit.RefreshDisplay();
-            item.AllLimits.Add(buildLimit);
-
-            var chatLimit = new UsageLimitInfo
-            {
-                Title = "チャット",
-                RemainingPercent = 99.0,
-                LimitDescription = "1% 使用",
-                ResetTimeText = "09/15 21:53 リセット"
-            };
-            chatLimit.RefreshDisplay();
-            item.AllLimits.Add(chatLimit);
-
-            LogOutputReceived?.Invoke("[Grok] フォールバック反映完了: 週次制限 8%使用済み (残92%)");
         }
     }
 
@@ -493,14 +515,13 @@ public class UsageFetcherService
         {
             item.PrimaryLimit.Title = _lastCopilotData.QuotaTitle; // 年間契約: "プレミアム要求" / その他: "AI Credits"
             
-            // 年間契約者（ユーザー様）: "2% 使用済み (残 294 / 300)"
-            // AI Creditsユーザー: "2% 使用済み (残 294 / 300 Credits)"
             string unitSuffix = _lastCopilotData.IsYearlySubscriber ? "" : $" {_lastCopilotData.UnitName}";
             item.PrimaryLimit.LimitDescription = $"{_lastCopilotData.UsedPercent:F0}% 使用済み (残 {_lastCopilotData.TotalCount - _lastCopilotData.UsedCount} / {_lastCopilotData.TotalCount}{unitSuffix})";
             item.PrimaryLimit.RemainingPercent = _lastCopilotData.RemainingPercent;
             item.PrimaryLimit.ResetTimeText = _lastCopilotData.ResetTimeText;
             item.PrimaryLimit.CustomDisplayPercentText = null;
 
+            item.CliInfo.IsLoggedIn = true;
             item.CliInfo.IsSubscribed = true;
             item.CliInfo.StatusMessage = $"プラン: Copilot Pro ({_lastCopilotData.RawResetNotice})";
 
@@ -508,15 +529,19 @@ public class UsageFetcherService
         }
         else
         {
-            // フォールバック（ユーザー様環境準拠）
-            item.PrimaryLimit.Title = "プレミアム要求";
-            item.PrimaryLimit.LimitDescription = "2% 使用済み (残 294 / 300)";
-            item.PrimaryLimit.RemainingPercent = 98.0;
-            item.PrimaryLimit.ResetTimeText = "10/01 09:00 リセット";
-            item.PrimaryLimit.CustomDisplayPercentText = null;
+            // 未ログインまたは取得失敗（偽のハードコードフォールバックを撤廃）
+            bool isGhAuth = CopilotQuotaClient.IsGhAuth();
+            item.CliInfo.IsLoggedIn = isGhAuth;
+            item.CliInfo.IsSubscribed = isGhAuth;
+            item.CliInfo.StatusMessage = isGhAuth 
+                ? "GitHub 接続待機中 (通信エラー)" 
+                : "未ログイン ('gh auth login' が必要)";
 
-            item.CliInfo.IsSubscribed = true;
-            item.CliInfo.StatusMessage = "プラン: Copilot Pro (10月1日 の 9:00 にリセットされます)";
+            item.PrimaryLimit.Title = "プレミアム要求";
+            item.PrimaryLimit.LimitDescription = isGhAuth ? "接続待機中..." : "未ログイン ('gh auth login' で連携)";
+            item.PrimaryLimit.RemainingPercent = 0.0;
+            item.PrimaryLimit.CustomDisplayPercentText = "--";
+            item.PrimaryLimit.ResetTimeText = isGhAuth ? "取得待機" : "要ログイン";
         }
 
         item.SecondaryLimit = null;
@@ -585,19 +610,52 @@ public class UsageFetcherService
             if (File.Exists(_cacheFilePath))
             {
                 var json = File.ReadAllText(_cacheFilePath);
-                _cachedGroups = JsonSerializer.Deserialize<List<QuotaGroup>>(json);
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    _cachedGroups = JsonSerializer.Deserialize<List<QuotaGroup>>(json);
+                }
+                else if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    var cache = JsonSerializer.Deserialize<AllQuotaCache>(json);
+                    if (cache != null)
+                    {
+                        _cachedGroups = cache.GeminiGroups;
+                        if (cache.CodexData?.IsSuccess == true) _lastCodexData = cache.CodexData;
+                        if (cache.ClaudeData?.IsSubscribed == true) _lastClaudeData = cache.ClaudeData;
+                        if (cache.GrokData?.IsSuccess == true) _lastGrokData = cache.GrokData;
+                        if (cache.CopilotData?.IsSuccess == true) _lastCopilotData = cache.CopilotData;
+                    }
+                }
             }
         }
         catch { }
     }
 
-    private void SaveCache(List<QuotaGroup> groups)
+    private void SaveCache()
     {
         try
         {
-            var json = JsonSerializer.Serialize(groups, new JsonSerializerOptions { WriteIndented = true });
+            var cache = new AllQuotaCache
+            {
+                GeminiGroups = _cachedGroups,
+                CodexData = _lastCodexData?.IsSuccess == true ? _lastCodexData : null,
+                ClaudeData = _lastClaudeData?.IsSubscribed == true ? _lastClaudeData : null,
+                GrokData = _lastGrokData?.IsSuccess == true ? _lastGrokData : null,
+                CopilotData = _lastCopilotData?.IsSuccess == true ? _lastCopilotData : null
+            };
+            var json = JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(_cacheFilePath, json);
         }
         catch { }
     }
+}
+
+public class AllQuotaCache
+{
+    public List<QuotaGroup>? GeminiGroups { get; set; }
+    public CodexQuotaData? CodexData { get; set; }
+    public ClaudeQuotaData? ClaudeData { get; set; }
+    public GrokQuotaData? GrokData { get; set; }
+    public CopilotQuotaData? CopilotData { get; set; }
 }

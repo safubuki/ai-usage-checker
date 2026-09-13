@@ -86,6 +86,7 @@ public class MainViewModel : ViewModelBase
     public RelayCommand<AiUsageItem> SelectItemCommand { get; }
     public RelayCommand CloseDetailCommand { get; }
     public RelayCommand<AiUsageItem> InstallCliCommand { get; }
+    public RelayCommand<AiUsageItem> LoginCliCommand { get; }
     public RelayCommand<AiUsageItem> UpdateCliCommand { get; }
     public RelayCommand<AiUsageItem> CheckCliCommand { get; }
     public RelayCommand<AiUsageItem> MoveLeftCommand { get; }
@@ -125,6 +126,21 @@ public class MainViewModel : ViewModelBase
             {
                 await _cliManager.InstallCliAsync(item.CliInfo);
                 await _usageFetcher.FetchUsageAsync(item);
+            }
+        });
+        LoginCliCommand = new RelayCommand<AiUsageItem>(async item =>
+        {
+            if (item != null)
+            {
+                var success = await _cliManager.LoginCliAsync(item.CliInfo);
+                if (success)
+                {
+                    await RefreshAllAsync(isSilent: false);
+                }
+                else
+                {
+                    await _usageFetcher.FetchUsageAsync(item);
+                }
             }
         });
         UpdateCliCommand = new RelayCommand<AiUsageItem>(async item =>

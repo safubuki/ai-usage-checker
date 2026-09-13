@@ -64,8 +64,8 @@ public class AiUsageItem : ViewModelBase
 
     public void UpdateStatusAndCheckRecovery()
     {
-        // データロード前は警告枠（赤枠・黄色枠）や回復緑枠を表示しない
-        if (!IsDataLoaded)
+        // データロード前、未契約時、未ログイン時、または表示が "--" の場合は警告枠（赤枠・黄色枠）や回復緑枠を表示しない
+        if (!IsDataLoaded || !CliInfo.IsSubscribed || !CliInfo.IsLoggedIn || PrimaryLimit.CustomDisplayPercentText == "--")
         {
             IsWeeklyExhausted = false;
             IsFiveHourExhausted = false;
@@ -202,6 +202,19 @@ public class AiUsageItem : ViewModelBase
             AiServiceType.Grok => "#EC4899",      // Grok Pink/Neon
             AiServiceType.Copilot => "#8B5CF6",   // GitHub Copilot Purple
             _ => "#22C55E"
+        };
+    }
+
+    public string LoginButtonText
+    {
+        get => ServiceType switch
+        {
+            AiServiceType.GPT => "🔑 ChatGPTにログイン",
+            AiServiceType.Claude => "🔑 Claudeにログイン",
+            AiServiceType.Grok => "🔑 xAI (Grok) にログイン",
+            AiServiceType.Copilot => "🔑 GitHub (Copilot) にログイン",
+            AiServiceType.Gemini => "🔑 Geminiにログイン",
+            _ => "🔑 ログイン (認証連携)"
         };
     }
 }

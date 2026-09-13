@@ -9,6 +9,7 @@ namespace AIUsageChecker.Services;
 public class CodexQuotaData
 {
     public bool IsSuccess { get; set; }
+    public bool IsAuthRequired { get; set; }
     public string PlanType { get; set; } = "";
     public bool HasFiveHourLimit { get; set; }
     public double FiveHourRemainingPercent { get; set; }
@@ -27,17 +28,32 @@ public class CodexQuotaClient
 
     public event Action<string>? LogOutputReceived;
 
+    public static string GetAuthFilePath()
+    {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(userProfile, ".codex", "auth.json");
+    }
+
+    public static bool IsAuthFileExists()
+    {
+        return File.Exists(GetAuthFilePath());
+    }
+
     public async Task<CodexQuotaData?> FetchCodexQuotaAsync()
     {
         try
         {
-            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var authFile = Path.Combine(userProfile, ".codex", "auth.json");
+            var authFile = GetAuthFilePath();
 
             if (!File.Exists(authFile))
             {
                 LogOutputReceived?.Invoke("[Codex] auth.json が見つかりません。'codex login' を実行してください。");
-                return null;
+                return new CodexQuotaData
+                {
+                    IsSuccess = false,
+                    IsAuthRequired = true,
+                    ErrorMessage = "auth.json が見つかりません ('codex login' が必要)"
+                };
             }
 
             LogOutputReceived?.Invoke($"[Codex] 認証情報確認: {authFile}");
@@ -59,7 +75,12 @@ public class CodexQuotaClient
             if (string.IsNullOrEmpty(accessToken))
             {
                 LogOutputReceived?.Invoke("[Codex] access_token が見つかりません。再ログインが必要です。");
-                return null;
+                return new CodexQuotaData
+                {
+                    IsSuccess = false,
+                    IsAuthRequired = true,
+                    ErrorMessage = "access_token が見つかりません (再ログインが必要)"
+                };
             }
 
             LogOutputReceived?.Invoke("[Codex] GET https://chatgpt.com/backend-api/wham/usage 送信中...");
@@ -78,7 +99,12 @@ public class CodexQuotaClient
             if (!response.IsSuccessStatusCode)
             {
                 LogOutputReceived?.Invoke($"[Codex] HTTP エラー: {(int)response.StatusCode} {response.ReasonPhrase}");
-                return null;
+                return new CodexQuotaData
+                {
+                    IsSuccess = false,
+                    IsAuthRequired = response.StatusCode == System.Net.HttpStatusCode.Unauthorized,
+                    ErrorMessage = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}"
+                };
             }
 
             var json = await response.Content.ReadAsStringAsync();

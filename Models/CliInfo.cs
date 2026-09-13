@@ -16,6 +16,19 @@ public class CliInfo : ViewModelBase
     private string _executablePath = "";
     private string _usageCheckCommand = "";
     private bool _isSubscribed = true;
+    private bool _isLoggedIn = true;
+
+    public bool IsLoggedIn
+    {
+        get => _isLoggedIn;
+        set
+        {
+            if (SetProperty(ref _isLoggedIn, value))
+            {
+                OnPropertyChanged(nameof(StatusBadgeText));
+            }
+        }
+    }
 
     public bool IsSubscribed
     {
@@ -120,6 +133,7 @@ public class CliInfo : ViewModelBase
             if (IsBusy) return "確認中...";
             if (!IsSubscribed) return "未契約";
             if (!IsInstalled) return "未導入";
+            if (!IsLoggedIn) return "要ログイン";
             if (HasUpdate) return "更新あり";
             return "最新";
         }
@@ -128,6 +142,7 @@ public class CliInfo : ViewModelBase
     public void CopyFrom(CliInfo other)
     {
         IsInstalled = other.IsInstalled;
+        IsLoggedIn = other.IsLoggedIn;
         InstalledVersion = other.InstalledVersion;
         LatestVersion = other.LatestVersion;
         HasUpdate = other.HasUpdate;

@@ -40,6 +40,7 @@ public class StatusBadgeBrushConverter : IValueConverter
             if (text.Contains("最新")) return GreenBrush;
             if (text.Contains("更新")) return OrangeBrush;
             if (text.Contains("未契約")) return RedBrush;
+            if (text.Contains("ログイン") || text.Contains("認証")) return OrangeBrush;
             return GrayBrush;
         }
         return GrayBrush;
@@ -62,6 +63,7 @@ public class StatusBadgeTextBrushConverter : IValueConverter
             if (text.Contains("最新")) return GreenText;
             if (text.Contains("更新")) return OrangeText;
             if (text.Contains("未契約")) return RedText;
+            if (text.Contains("ログイン") || text.Contains("認証")) return OrangeText;
             return GrayText;
         }
         return GrayText;

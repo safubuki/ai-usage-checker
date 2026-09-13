@@ -9,6 +9,7 @@ namespace AIUsageChecker.Services;
 public class ClaudeQuotaData
 {
     public bool IsSubscribed { get; set; }
+    public bool IsAuthRequired { get; set; }
     public string PlanName { get; set; } = "Claude";
     public bool HasFiveHourLimit { get; set; }
     public double FiveHourRemainingPercent { get; set; }
@@ -23,20 +24,31 @@ public class ClaudeQuotaClient
 {
     public event Action<string>? LogOutputReceived;
 
+    public static string GetConfigFilePath()
+    {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(userProfile, ".claude.json");
+    }
+
+    public static bool IsConfigExists()
+    {
+        return File.Exists(GetConfigFilePath());
+    }
+
     public async Task<ClaudeQuotaData> FetchClaudeQuotaAsync()
     {
         var result = new ClaudeQuotaData();
 
         try
         {
-            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var claudeJsonPath = Path.Combine(userProfile, ".claude.json");
+            var claudeJsonPath = GetConfigFilePath();
 
             if (!File.Exists(claudeJsonPath))
             {
                 result.IsSubscribed = false;
-                result.StatusMessage = "未契約 (設定未検出)";
-                LogOutputReceived?.Invoke("[Claude] ~/.claude.json が見つかりません（未導入・未契約）");
+                result.IsAuthRequired = true;
+                result.StatusMessage = "未ログイン ('claude login' が必要)";
+                LogOutputReceived?.Invoke("[Claude] ~/.claude.json が見つかりません（未ログイン）");
                 return result;
             }
 
