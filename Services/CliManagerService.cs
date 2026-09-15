@@ -32,7 +32,7 @@ public class CliManagerService
     {
         cli.IsBusy = true;
         cli.StatusMessage = "状態を確認中...";
-        Log($"{cli.Name} の状態を確認中...");
+        Log($"[{cli.Name}] 状態を確認中...");
 
         try
         {
@@ -44,9 +44,9 @@ public class CliManagerService
                 cli.ExecutablePath = exePath;
 
                 // バージョンの取得
-                var version = await GetInstalledVersionAsync(cli.CommandName);
+                var version = await GetInstalledVersionAsync(cli.CommandName, cli.Name);
                 cli.InstalledVersion = version;
-                Log($"{cli.Name} インストール済み: {version} ({exePath})");
+                Log($"[{cli.Name}] インストール済み: {version} ({exePath})");
 
                 // 最新バージョンの取得
                 var latest = await GetLatestVersionAsync(cli);
@@ -57,7 +57,7 @@ public class CliManagerService
                     if (cli.HasUpdate)
                     {
                         cli.StatusMessage = $"更新があります (最新: v{latest})";
-                        Log($"{cli.Name} に新しいバージョンがあります: {latest}");
+                        Log($"[{cli.Name}] に新しいバージョンがあります: {latest}");
                     }
                     else
                     {
@@ -76,7 +76,7 @@ public class CliManagerService
                     if (!cli.IsLoggedIn)
                     {
                         cli.StatusMessage = "未ログイン ('codex login' が必要)";
-                        Log($"{cli.Name} は未ログイン状態です (~/.codex/auth.json 未検出)");
+                        Log($"[{cli.Name}] は未ログイン状態です (~/.codex/auth.json 未検出)");
                     }
                 }
                 else if (cli.CommandName.Equals("claude", StringComparison.OrdinalIgnoreCase))
@@ -85,7 +85,7 @@ public class CliManagerService
                     if (!cli.IsLoggedIn)
                     {
                         cli.StatusMessage = "未ログイン ('claude login' が必要)";
-                        Log($"{cli.Name} は未ログイン状態です (~/.claude.json 未検出)");
+                        Log($"[{cli.Name}] は未ログイン状態です (~/.claude.json 未検出)");
                     }
                 }
                 else if (cli.CommandName.Equals("grok", StringComparison.OrdinalIgnoreCase))
@@ -94,7 +94,7 @@ public class CliManagerService
                     if (!cli.IsLoggedIn)
                     {
                         cli.StatusMessage = "未ログイン ('grok' 認証が必要)";
-                        Log($"{cli.Name} は未ログイン状態です (~/.grok/auth.json 未検出)");
+                        Log($"[{cli.Name}] は未ログイン状態です (~/.grok/auth.json 未検出)");
                     }
                 }
                 else if (cli.CommandName.Equals("copilot", StringComparison.OrdinalIgnoreCase))
@@ -103,7 +103,7 @@ public class CliManagerService
                     if (!cli.IsLoggedIn)
                     {
                         cli.StatusMessage = "未ログイン ('gh auth login' が必要)";
-                        Log($"{cli.Name} は未ログイン状態です ('gh auth status' 未認証)");
+                        Log($"[{cli.Name}] は未ログイン状態です ('gh auth status' 未認証)");
                     }
                 }
                 else if (cli.CommandName.Equals("gemini", StringComparison.OrdinalIgnoreCase))
@@ -119,7 +119,7 @@ public class CliManagerService
                 cli.ExecutablePath = "";
                 cli.HasUpdate = false;
                 cli.StatusMessage = "未インストール";
-                Log($"{cli.Name} はインストールされていません");
+                Log($"[{cli.Name}] はインストールされていません");
 
                 // 未インストールでも最新バージョン情報を取得
                 var latest = await GetLatestVersionAsync(cli);
@@ -132,7 +132,7 @@ public class CliManagerService
         catch (Exception ex)
         {
             cli.StatusMessage = $"確認失敗: {ex.Message}";
-            Log($"{cli.Name} の確認中にエラー: {ex.Message}");
+            Log($"[{cli.Name}] の確認中にエラー: {ex.Message}");
         }
         finally
         {
@@ -279,7 +279,7 @@ public class CliManagerService
     {
         cli.IsBusy = true;
         cli.StatusMessage = "インストール中...";
-        Log($"=== {cli.Name} のインストールを開始します ({cli.PackageName}) ===");
+        Log($"[{cli.Name}] のインストールを開始します ({cli.PackageName})");
 
         try
         {
@@ -299,24 +299,24 @@ public class CliManagerService
                 args = $"/c npm install -g {cli.PackageName}@latest";
             }
 
-            var result = await RunProcessAsync(command, args);
+            var result = await RunProcessAsync(command, args, cli.Name);
             if (result.ExitCode == 0)
             {
-                Log($"{cli.Name} のインストールが完了しました！");
+                Log($"[{cli.Name}] のインストールが完了しました！");
                 await CheckCliStatusAsync(cli);
                 return true;
             }
             else
             {
                 cli.StatusMessage = "インストールに失敗しました";
-                Log($"[エラー] {cli.Name} のインストールに失敗しました (終了コード: {result.ExitCode}): {result.Error}");
+                Log($"[{cli.Name}] インストール失敗 (終了コード: {result.ExitCode}): {result.Error}");
                 return false;
             }
         }
         catch (Exception ex)
         {
             cli.StatusMessage = $"インストール例外: {ex.Message}";
-            Log($"[例外] {cli.Name} のインストール中に例外: {ex.Message}");
+            Log($"[{cli.Name}] インストール中に例外: {ex.Message}");
             return false;
         }
         finally
@@ -329,7 +329,7 @@ public class CliManagerService
     {
         cli.IsBusy = true;
         cli.StatusMessage = "アップデート中...";
-        Log($"=== {cli.Name} のアップデートを開始します ===");
+        Log($"[{cli.Name}] のアップデートを開始します");
 
         try
         {
@@ -352,24 +352,24 @@ public class CliManagerService
                 args = $"/c npm install -g {cli.PackageName}@latest";
             }
 
-            var result = await RunProcessAsync(command, args);
+            var result = await RunProcessAsync(command, args, cli.Name);
             if (result.ExitCode == 0)
             {
-                Log($"{cli.Name} のアップデートが完了しました！");
+                Log($"[{cli.Name}] のアップデートが完了しました！");
                 await CheckCliStatusAsync(cli);
                 return true;
             }
             else
             {
                 cli.StatusMessage = "アップデート失敗";
-                Log($"[エラー] {cli.Name} のアップデートに失敗 (終了コード: {result.ExitCode}): {result.Error}");
+                Log($"[{cli.Name}] アップデート失敗 (終了コード: {result.ExitCode}): {result.Error}");
                 return false;
             }
         }
         catch (Exception ex)
         {
             cli.StatusMessage = $"アップデート例外: {ex.Message}";
-            Log($"[例外] {cli.Name} のアップデート中に例外: {ex.Message}");
+            Log($"[{cli.Name}] アップデート中に例外: {ex.Message}");
             return false;
         }
         finally
@@ -429,11 +429,11 @@ public class CliManagerService
         return null;
     }
 
-    private async Task<string> GetInstalledVersionAsync(string commandName)
+    private async Task<string> GetInstalledVersionAsync(string commandName, string? cliName = null)
     {
         try
         {
-            var result = await RunProcessAsync("cmd.exe", $"/c {commandName} --version");
+            var result = await RunProcessAsync("cmd.exe", $"/c {commandName} --version", cliName ?? commandName);
             if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
             {
                 var match = Regex.Match(result.Output, @"\d+\.\d+(\.\d+)?(-[a-zA-Z0-9.]+)?");
@@ -457,7 +457,7 @@ public class CliManagerService
 
         try
         {
-            var result = await RunProcessAsync("cmd.exe", $"/c npm view {cli.PackageName} version");
+            var result = await RunProcessAsync("cmd.exe", $"/c npm view {cli.PackageName} version", cli.Name);
             if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
             {
                 return result.Output.Trim();
@@ -485,7 +485,7 @@ public class CliManagerService
         return false;
     }
 
-    private async Task<(int ExitCode, string Output, string Error)> RunProcessAsync(string fileName, string args)
+    private async Task<(int ExitCode, string Output, string Error)> RunProcessAsync(string fileName, string args, string? prefix = null)
     {
         var tcs = new TaskCompletionSource<(int, string, string)>();
 
@@ -510,7 +510,10 @@ public class CliManagerService
             if (e.Data != null)
             {
                 stdout.AppendLine(e.Data);
-                Log(e.Data);
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                {
+                    Log(string.IsNullOrEmpty(prefix) ? e.Data : $"[{prefix}] {e.Data}");
+                }
             }
         };
 
@@ -519,7 +522,10 @@ public class CliManagerService
             if (e.Data != null)
             {
                 stderr.AppendLine(e.Data);
-                Log($"[stderr] {e.Data}");
+                if (!string.IsNullOrWhiteSpace(e.Data))
+                {
+                    Log(string.IsNullOrEmpty(prefix) ? $"[stderr] {e.Data}" : $"[{prefix} stderr] {e.Data}");
+                }
             }
         };
 

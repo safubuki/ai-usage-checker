@@ -179,15 +179,13 @@ public partial class MainWindow : Window
     {
         if (sender is FrameworkElement fe && fe.DataContext is AiUsageItem item)
         {
-            item.DismissGlow();
-            _viewModel.SelectedItem = item;
-            _viewModel.IsDetailOpen = true;
+            _viewModel.OpenDetail(item);
         }
     }
 
     private void Backdrop_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        _viewModel.IsDetailOpen = false;
+        _viewModel.CloseDetail();
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)

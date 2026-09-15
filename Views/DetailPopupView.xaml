@@ -245,8 +245,85 @@
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
                             <Grid Grid.Row="0" Margin="0,0,0,4">
-                                <TextBlock Text="CLI実行ログ" FontSize="9.5" FontWeight="Bold" Foreground="#9CA3AF"/>
-                                <Button Content="クリア" FontSize="8.5" HorizontalAlignment="Right" Background="Transparent" Foreground="#6B7280" BorderThickness="0" Command="{Binding ClearLogsCommand}" Cursor="Hand"/>
+                                <TextBlock Text="CLI実行ログ" FontSize="9.5" FontWeight="Bold" Foreground="#9CA3AF" VerticalAlignment="Center"/>
+
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <!-- ログフィルター切り替えピルボタン -->
+                                    <Border CornerRadius="3" Background="#161E1C" BorderBrush="#263530" BorderThickness="1" Margin="0,0,6,0" Padding="1">
+                                        <StackPanel Orientation="Horizontal">
+                                            <!-- [サービスのみ] ボタン -->
+                                            <Button Command="{Binding ShowFilteredLogsCommand}" 
+                                                    Cursor="Hand" BorderThickness="0" Padding="6,1" FontSize="8.5">
+                                                <Button.Style>
+                                                    <Style TargetType="Button">
+                                                        <Setter Property="Background" Value="Transparent"/>
+                                                        <Setter Property="Foreground" Value="#6B7280"/>
+                                                        <Setter Property="Template">
+                                                            <Setter.Value>
+                                                                <ControlTemplate TargetType="Button">
+                                                                    <Border Background="{TemplateBinding Background}" CornerRadius="2" Padding="{TemplateBinding Padding}">
+                                                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                                    </Border>
+                                                                </ControlTemplate>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsShowAllLogs}" Value="False">
+                                                                <Setter Property="Background" Value="#059669"/>
+                                                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                                                                <Setter Property="FontWeight" Value="Bold"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                                <TextBlock>
+                                                    <Run Text="{Binding SelectedItem.DisplayName}"/>
+                                                    <Run Text="のみ"/>
+                                                </TextBlock>
+                                            </Button>
+
+                                            <!-- [全体ログ] ボタン -->
+                                            <Button Command="{Binding ShowAllLogsCommand}" 
+                                                    Cursor="Hand" BorderThickness="0" Padding="6,1" FontSize="8.5" Content="全体ログ">
+                                                <Button.Style>
+                                                    <Style TargetType="Button">
+                                                        <Setter Property="Background" Value="Transparent"/>
+                                                        <Setter Property="Foreground" Value="#6B7280"/>
+                                                        <Setter Property="Template">
+                                                            <Setter.Value>
+                                                                <ControlTemplate TargetType="Button">
+                                                                    <Border Background="{TemplateBinding Background}" CornerRadius="2" Padding="{TemplateBinding Padding}">
+                                                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                                    </Border>
+                                                                </ControlTemplate>
+                                                            </Setter.Value>
+                                                        </Setter>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsShowAllLogs}" Value="True">
+                                                                <Setter Property="Background" Value="#059669"/>
+                                                                <Setter Property="Foreground" Value="#FFFFFF"/>
+                                                                <Setter Property="FontWeight" Value="Bold"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                            </Button>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- クリアボタン -->
+                                    <Button Content="クリア" FontSize="8.5" 
+                                            Background="Transparent" Foreground="#6B7280" BorderThickness="0" 
+                                            Command="{Binding ClearLogsCommand}" Cursor="Hand" Padding="4,1">
+                                        <Button.Template>
+                                            <ControlTemplate TargetType="Button">
+                                                <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Button.Template>
+                                    </Button>
+                                </StackPanel>
                             </Grid>
                             <ListBox Grid.Row="1" 
                                      ItemsSource="{Binding ConsoleLogs}" 

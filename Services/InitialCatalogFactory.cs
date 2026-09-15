@@ -15,11 +15,11 @@ public static class InitialCatalogFactory
     {
         var services = new List<AiUsageItem>
         {
-            // 1. GPT (OpenAI / Codex)
+            // 1. GPT/Codex (OpenAI / Codex)
             new()
             {
                 ServiceType = AiServiceType.GPT,
-                DisplayName = "GPT",
+                DisplayName = "GPT/Codex",
                 SubTitle = "OpenAI / Codex",
                 IconGlyph = "⚡",
                 CliInfo = new CliInfo
@@ -166,7 +166,11 @@ public static class InitialCatalogFactory
 
         foreach (var name in orderList)
         {
-            var match = services.FirstOrDefault(x => x.DisplayName.Equals(name, StringComparison.OrdinalIgnoreCase));
+            var match = services.FirstOrDefault(x => 
+                x.DisplayName.Equals(name, StringComparison.OrdinalIgnoreCase) ||
+                (name.Equals("GPT", StringComparison.OrdinalIgnoreCase) && x.ServiceType == AiServiceType.GPT) ||
+                (name.Equals("GPT (Codex)", StringComparison.OrdinalIgnoreCase) && x.ServiceType == AiServiceType.GPT) ||
+                (name.Equals("GPT/Codex", StringComparison.OrdinalIgnoreCase) && x.ServiceType == AiServiceType.GPT));
             if (match != null && !ordered.Contains(match))
             {
                 ordered.Add(match);

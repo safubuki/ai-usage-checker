@@ -23,7 +23,9 @@ public class MainViewModel : ViewModelBase
     private bool _isDocked;
     private bool _isRefreshing;
     private string _statusText = "準備完了";
+    private readonly List<LogEntry> _allLogEntries = new();
     private ObservableCollection<string> _consoleLogs = new();
+    private bool _isShowAllLogs;
 
     public ObservableCollection<AiUsageItem> Items
     {
@@ -34,13 +36,42 @@ public class MainViewModel : ViewModelBase
     public AiUsageItem? SelectedItem
     {
         get => _selectedItem;
-        set => SetProperty(ref _selectedItem, value);
+        set
+        {
+            if (SetProperty(ref _selectedItem, value))
+            {
+                UpdateVisibleLogs();
+            }
+        }
+    }
+
+    public bool IsShowAllLogs
+    {
+        get => _isShowAllLogs;
+        set
+        {
+            if (SetProperty(ref _isShowAllLogs, value))
+            {
+                UpdateVisibleLogs();
+            }
+        }
     }
 
     public bool IsDetailOpen
     {
         get => _isDetailOpen;
-        set => SetProperty(ref _isDetailOpen, value);
+        set
+        {
+            if (SetProperty(ref _isDetailOpen, value))
+            {
+                if (value)
+                {
+                    _isShowAllLogs = false;
+                    OnPropertyChanged(nameof(IsShowAllLogs));
+                    UpdateVisibleLogs();
+                }
+            }
+        }
     }
 
     public bool IsAlwaysOnTop
@@ -93,6 +124,8 @@ public class MainViewModel : ViewModelBase
     public RelayCommand<AiUsageItem> MoveRightCommand { get; }
     public RelayCommand ToggleDockCommand { get; }
     public RelayCommand ToggleAlwaysOnTopCommand { get; }
+    public RelayCommand ShowFilteredLogsCommand { get; }
+    public RelayCommand ShowAllLogsCommand { get; }
     public RelayCommand ClearLogsCommand { get; }
 
     public MainViewModel()
@@ -114,12 +147,10 @@ public class MainViewModel : ViewModelBase
         {
             if (item != null)
             {
-                SelectedItem = item;
-                item.DismissGlow();
-                IsDetailOpen = true;
+                OpenDetail(item);
             }
         });
-        CloseDetailCommand = new RelayCommand(() => IsDetailOpen = false);
+        CloseDetailCommand = new RelayCommand(CloseDetail);
         InstallCliCommand = new RelayCommand<AiUsageItem>(async item =>
         {
             if (item != null)
@@ -175,7 +206,17 @@ public class MainViewModel : ViewModelBase
             _settingsService.SaveSettings(_settings);
         });
 
-        ClearLogsCommand = new RelayCommand(() => ConsoleLogs.Clear());
+        ShowFilteredLogsCommand = new RelayCommand(() =>
+        {
+            IsShowAllLogs = false;
+            UpdateVisibleLogs();
+        });
+        ShowAllLogsCommand = new RelayCommand(() =>
+        {
+            IsShowAllLogs = true;
+            UpdateVisibleLogs();
+        });
+        ClearLogsCommand = new RelayCommand(ClearLogs);
 
         // 自動更新タイマー (5分ごと: バックグラウンドでサイレント更新)
         _autoRefreshTimer = new DispatcherTimer
@@ -189,16 +230,116 @@ public class MainViewModel : ViewModelBase
         InitializeItems();
     }
 
+    public void OpenDetail(AiUsageItem item)
+    {
+        if (item == null) return;
+        item.DismissGlow();
+        SelectedItem = item;
+        IsShowAllLogs = false; // 詳細を開くときはそのサービス専用ログを初期表示
+        IsDetailOpen = true;
+        UpdateVisibleLogs();
+    }
+
+    public void CloseDetail()
+    {
+        IsDetailOpen = false;
+        SelectedItem = null;
+    }
+
     private void AddLog(string log)
+    {
+        var serviceType = DetectServiceType(log);
+        var entry = new LogEntry(log, serviceType);
+
+        App.Current?.Dispatcher.Invoke(() =>
+        {
+            _allLogEntries.Insert(0, entry);
+            if (_allLogEntries.Count > 500)
+            {
+                _allLogEntries.RemoveAt(_allLogEntries.Count - 1);
+            }
+
+            if (ShouldDisplayLog(entry))
+            {
+                ConsoleLogs.Insert(0, entry.Message);
+                if (ConsoleLogs.Count > 200)
+                {
+                    ConsoleLogs.RemoveAt(ConsoleLogs.Count - 1);
+                }
+            }
+        });
+    }
+
+    private void ClearLogs()
     {
         App.Current?.Dispatcher.Invoke(() =>
         {
-            ConsoleLogs.Insert(0, log);
-            if (ConsoleLogs.Count > 200)
+            if (IsShowAllLogs || SelectedItem == null)
             {
-                ConsoleLogs.RemoveAt(ConsoleLogs.Count - 1);
+                _allLogEntries.Clear();
+            }
+            else
+            {
+                _allLogEntries.RemoveAll(x => x.ServiceType == SelectedItem.ServiceType);
+            }
+            UpdateVisibleLogs();
+        });
+    }
+
+    private void UpdateVisibleLogs()
+    {
+        App.Current?.Dispatcher.Invoke(() =>
+        {
+            ConsoleLogs.Clear();
+            var matching = _allLogEntries
+                .Where(ShouldDisplayLog)
+                .Take(200);
+
+            foreach (var entry in matching)
+            {
+                ConsoleLogs.Add(entry.Message);
             }
         });
+    }
+
+    private bool ShouldDisplayLog(LogEntry entry)
+    {
+        if (IsShowAllLogs) return true;
+        if (SelectedItem == null) return true;
+        return entry.ServiceType == SelectedItem.ServiceType;
+    }
+
+    private static AiServiceType? DetectServiceType(string log)
+    {
+        if (string.IsNullOrWhiteSpace(log)) return null;
+
+        if (log.Contains("[Gemini", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("Gemini", StringComparison.OrdinalIgnoreCase))
+            return AiServiceType.Gemini;
+
+        if (log.Contains("[Codex", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("[GPT", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("codex", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("chatgpt", StringComparison.OrdinalIgnoreCase))
+            return AiServiceType.GPT;
+
+        if (log.Contains("[Claude", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("Claude", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("Anthropic", StringComparison.OrdinalIgnoreCase))
+            return AiServiceType.Claude;
+
+        if (log.Contains("[Grok", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("Grok", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("xai", StringComparison.OrdinalIgnoreCase))
+            return AiServiceType.Grok;
+
+        if (log.Contains("[Copilot", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("Copilot", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("gh api", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("gh auth", StringComparison.OrdinalIgnoreCase))
+            return AiServiceType.Copilot;
+
+        return null;
     }
 
     private void InitializeItems()
@@ -307,5 +448,17 @@ public class MainViewModel : ViewModelBase
     {
         _settings.DisplayOrder = Items.Select(x => x.DisplayName).ToList();
         _settingsService.SaveSettings(_settings);
+    }
+}
+
+public class LogEntry
+{
+    public string Message { get; }
+    public AiServiceType? ServiceType { get; }
+
+    public LogEntry(string message, AiServiceType? serviceType)
+    {
+        Message = message;
+        ServiceType = serviceType;
     }
 }

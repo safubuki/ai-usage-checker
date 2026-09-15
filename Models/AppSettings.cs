@@ -6,7 +6,7 @@ public class AppSettings
 {
     public List<string> DisplayOrder { get; set; } = new()
     {
-        "GPT",
+        "GPT/Codex",
         "Claude",
         "Gemini",
         "Grok",
