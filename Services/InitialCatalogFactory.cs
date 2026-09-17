@@ -74,7 +74,7 @@ public static class InitialCatalogFactory
                 SecondaryLimit = null
             },
 
-            // 3. Gemini (Google DeepMind)
+            // 3. Gemini (Google DeepMind / Antigravity CLI 'agy')
             new()
             {
                 ServiceType = AiServiceType.Gemini,
@@ -83,10 +83,10 @@ public static class InitialCatalogFactory
                 IconGlyph = "✧",
                 CliInfo = new CliInfo
                 {
-                    Name = "Gemini",
-                    CommandName = "gemini",
-                    PackageName = "@google/gemini-cli",
-                    UsageCheckCommand = "/usage (agy status)",
+                    Name = "Gemini (agy)",
+                    CommandName = "agy",
+                    PackageName = "antigravity-cli",
+                    UsageCheckCommand = "agy (Language Server)",
                     StatusMessage = "利用状況を確認中..."
                 },
                 PrimaryLimit = new UsageLimitInfo
@@ -170,7 +170,9 @@ public static class InitialCatalogFactory
                 x.DisplayName.Equals(name, StringComparison.OrdinalIgnoreCase) ||
                 (name.Equals("GPT", StringComparison.OrdinalIgnoreCase) && x.ServiceType == AiServiceType.GPT) ||
                 (name.Equals("GPT (Codex)", StringComparison.OrdinalIgnoreCase) && x.ServiceType == AiServiceType.GPT) ||
-                (name.Equals("GPT/Codex", StringComparison.OrdinalIgnoreCase) && x.ServiceType == AiServiceType.GPT));
+                (name.Equals("GPT/Codex", StringComparison.OrdinalIgnoreCase) && x.ServiceType == AiServiceType.GPT) ||
+                (name.Equals("Gemini", StringComparison.OrdinalIgnoreCase) && x.ServiceType == AiServiceType.Gemini) ||
+                (name.Equals("Antigravity", StringComparison.OrdinalIgnoreCase) && x.ServiceType == AiServiceType.Gemini));
             if (match != null && !ordered.Contains(match))
             {
                 ordered.Add(match);

@@ -198,7 +198,7 @@ public class AiUsageItem : ViewModelBase
         {
             AiServiceType.GPT => "#10A37F",       // OpenAI Emerald
             AiServiceType.Claude => "#D97706",    // Claude Amber/Orange
-            AiServiceType.Gemini => "#3B82F6",    // Gemini Blue/Violet
+            AiServiceType.Gemini => "#3B82F6",    // Antigravity Blue/Indigo
             AiServiceType.Grok => "#EC4899",      // Grok Pink/Neon
             AiServiceType.Copilot => "#8B5CF6",   // GitHub Copilot Purple
             _ => "#22C55E"
@@ -213,7 +213,7 @@ public class AiUsageItem : ViewModelBase
             AiServiceType.Claude => "🔑 Claudeにログイン",
             AiServiceType.Grok => "🔑 xAI (Grok) にログイン",
             AiServiceType.Copilot => "🔑 GitHub (Copilot) にログイン",
-            AiServiceType.Gemini => "🔑 Geminiにログイン",
+            AiServiceType.Gemini => "🔑 Google (Gemini) にログイン",
             _ => "🔑 ログイン (認証連携)"
         };
     }

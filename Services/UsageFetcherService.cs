@@ -105,7 +105,7 @@ public class UsageFetcherService
             }
             catch (Exception ex)
             {
-                LogOutputReceived?.Invoke($"[Gemini] LanguageServer取得例外: {ex.Message}");
+                LogOutputReceived?.Invoke($"[Antigravity] LanguageServer取得例外: {ex.Message}");
             }
         });
 
@@ -375,6 +375,9 @@ public class UsageFetcherService
 
     private void ApplyGeminiQuota(AiUsageItem item, List<QuotaGroup>? groups)
     {
+        item.DisplayName = "Gemini";
+        item.SubTitle = "Google DeepMind";
+
         var geminiGroup = groups?.FirstOrDefault(g => g.DisplayName.Contains("Gemini", StringComparison.OrdinalIgnoreCase));
         if (geminiGroup != null)
         {
@@ -403,7 +406,44 @@ public class UsageFetcherService
             item.CliInfo.IsLoggedIn = true;
             item.CliInfo.IsSubscribed = true;
             item.CliInfo.StatusMessage = "Google DeepMind 連携稼働中";
-            LogOutputReceived?.Invoke($"[Gemini] Antigravity 言語サーバーより取得: 5h枠={item.PrimaryLimit.RemainingPercent:F0}%, 週次枠={item.SecondaryLimit?.RemainingPercent:F0}%");
+            LogOutputReceived?.Invoke($"[Antigravity] 言語サーバーより取得: 5h枠={item.PrimaryLimit.RemainingPercent:F0}%, 週次枠={item.SecondaryLimit?.RemainingPercent:F0}%");
+
+            item.AllLimits.Clear();
+            item.AllLimits.Add(item.PrimaryLimit);
+            if (item.SecondaryLimit != null) item.AllLimits.Add(item.SecondaryLimit);
+
+            // 外部モデル枠 (Claude / GPT models) があれば詳細画面の内訳枠として追加
+            var thirdPartyGroup = groups?.FirstOrDefault(g => 
+                g.DisplayName.Contains("Claude", StringComparison.OrdinalIgnoreCase) || 
+                g.DisplayName.Contains("GPT", StringComparison.OrdinalIgnoreCase) ||
+                g.DisplayName.Contains("3p", StringComparison.OrdinalIgnoreCase));
+
+            if (thirdPartyGroup != null)
+            {
+                var tp5h = thirdPartyGroup.Buckets.FirstOrDefault(b => b.Window == "5h" || b.DisplayName.Contains("Five Hour", StringComparison.OrdinalIgnoreCase));
+                var tpWeekly = thirdPartyGroup.Buckets.FirstOrDefault(b => b.Window == "weekly" || b.DisplayName.Contains("Weekly", StringComparison.OrdinalIgnoreCase));
+
+                if (tp5h != null)
+                {
+                    item.AllLimits.Add(new UsageLimitInfo
+                    {
+                        Title = "外部モデル 5時間制限",
+                        LimitDescription = "Claude / GPT models 5h limit",
+                        RemainingPercent = tp5h.RemainingFraction * 100.0,
+                        ResetTimeText = FormatResetTime(tp5h.ResetTime, "リセット")
+                    });
+                }
+                if (tpWeekly != null)
+                {
+                    item.AllLimits.Add(new UsageLimitInfo
+                    {
+                        Title = "外部モデル 週次制限",
+                        LimitDescription = "Claude / GPT models Weekly limit",
+                        RemainingPercent = tpWeekly.RemainingFraction * 100.0,
+                        ResetTimeText = FormatResetTime(tpWeekly.ResetTime, "リセット")
+                    });
+                }
+            }
         }
         else
         {
@@ -421,13 +461,13 @@ public class UsageFetcherService
             item.SecondaryLimit.CustomDisplayPercentText = "--";
             item.SecondaryLimit.ResetTimeText = "待機中";
 
-            item.CliInfo.IsLoggedIn = true;
+            item.CliInfo.IsLoggedIn = CliManagerService.IsAntigravityAuthExists();
             item.CliInfo.StatusMessage = "Antigravity 接続待機中";
-        }
 
-        item.AllLimits.Clear();
-        item.AllLimits.Add(item.PrimaryLimit);
-        if (item.SecondaryLimit != null) item.AllLimits.Add(item.SecondaryLimit);
+            item.AllLimits.Clear();
+            item.AllLimits.Add(item.PrimaryLimit);
+            if (item.SecondaryLimit != null) item.AllLimits.Add(item.SecondaryLimit);
+        }
     }
 
     private void ApplyGrokQuota(AiUsageItem item)

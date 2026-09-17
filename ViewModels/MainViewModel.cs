@@ -313,7 +313,10 @@ public class MainViewModel : ViewModelBase
     {
         if (string.IsNullOrWhiteSpace(log)) return null;
 
-        if (log.Contains("[Gemini", StringComparison.OrdinalIgnoreCase) ||
+        if (log.Contains("[Antigravity", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("Antigravity", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("agy", StringComparison.OrdinalIgnoreCase) ||
+            log.Contains("[Gemini", StringComparison.OrdinalIgnoreCase) ||
             log.Contains("Gemini", StringComparison.OrdinalIgnoreCase))
             return AiServiceType.Gemini;
 

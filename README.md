@@ -68,9 +68,9 @@
      - **Plus契約等**: 5時間制限 ＋ 週次制限 ＋ 予備枠（`gpt-reserve`）の3層クォータを検出し、**カード上でダブル表示**。
      - **Pro契約等**: 短期制限がなく週次制限のみのプランでは、APIの制限ウィンドウ秒数（`limit_window_seconds`）を自動解析し、**自動的に週次制限のみの単一枠（大リング）表示に切り替わります**。
    - **Claude**:
-     - **未契約時**: 「未契約」赤バッジおよび「--」ゲージの単一枠として表示。
+     - **未契約時**: 「未契約」グレーバッジおよび「--」ゲージの単一枠として表示。
      - **契約時（Claude Pro / Max / Team等）**: `~/.claude.json` のクォータ（`five_hour` および `seven_day`）を検知し、**自動的に5時間制限＋週次制限のダブル表示へと昇格・機能**します。
-   - **Gemini**: 5時間制限 ＋ 週次制限（Google DeepMind Antigravity連携）
+   - **Gemini**: 5時間制限 ＋ 週次制限（Google DeepMind Antigravity CLI 'agy' / 言語サーバー連携）
    - **Grok**: SuperGrok Weekly limit（週次単一制限）
    - **GitHub Copilot**:
      - **年間契約（維持環境等）**: **「プレミアム要求」**（単位: 要求/回、例: `2% 使用済み (残 294 / 300)`）として正確に表示。
@@ -94,7 +94,7 @@
 |---|---|---|---|
 | **GPT** | OpenAI Codex (`codex`) | プラン動的判定<br>・Plus等: 5時間制限 + 週次制限 + 予備枠<br>・Pro等: 週次制限のみ（自動判定） | Codex認証トークン経由 生API直接取得 |
 | **Claude** | Anthropic (`claude`) | 契約時: 5時間制限 + 週次制限<br>未契約時: 契約ステータス | `~/.claude.json` / Claude CLI 連携 |
-| **Gemini** | Google DeepMind (`gemini`) | 5時間制限 + 週次制限 | Antigravity 言語サーバー連携 |
+| **Gemini** | Google DeepMind (Antigravity CLI: `agy`) | 5時間制限 + 週次制限（外部モデル枠対応） | Antigravity 言語サーバー連携 |
 | **Grok** | xAI (`grok`) | 週次制限 (SuperGrok) | Grok CLI / 利用状況判定 |
 | **Copilot** | GitHub Copilot (`copilot`) | 契約形態自動判定<br>・年間契約: プレミアム要求 (要求/回)<br>・一般/月間: AI Credits (Credits) | GitHub CLI (`gh api`) 直接連携 |
 
@@ -119,13 +119,19 @@ cd ai-usage-checker
 ```
 
 ### 2. ビルド & 実行
+
 ```bash
-# 通常起動
+# 通常起動 (推奨)
 dotnet run
 
-# リリースビルド
-dotnet build -c Release
+# リリース用 単一実行ファイルの発行 (Windows 11 スマート アプリ コントロール対応)
+# publish.bat をダブルクリックするか、以下のコマンドを実行:
+dotnet publish -c Release -r win-x64 --self-contained false -o bin\Release\publish
 ```
+> [!TIP]
+> **Windows 11 で「このアプリの一部がブロックされています (AIUsageChecker.dll)」と表示される場合**:
+> Windows 11 の「スマート アプリ コントロール (SAC)」が未署名の個別 DLL ロードを検知したことによる警告です。
+> 上記の `publish.bat` で発行した **`bin\Release\publish\AIUsageChecker.exe`**（単一ファイル構成）を実行するか、Windows の「設定 > システム > 開発者向け > 開発者モード」をオンにすることで回避できます。
 
 ---
 

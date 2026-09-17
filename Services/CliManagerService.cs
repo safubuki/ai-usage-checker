@@ -1,7 +1,9 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using AIUsageChecker.Models;
@@ -15,12 +17,17 @@ public class CliManagerService
     private readonly string _userProfile;
     private readonly string _npmGlobalPath;
     private readonly string _grokBinPath;
+    private readonly string _agyBinPath;
+    private readonly string _geminiBinPath;
+    private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(5) };
 
     public CliManagerService()
     {
         _userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _npmGlobalPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm");
         _grokBinPath = Path.Combine(_userProfile, ".grok", "bin");
+        _agyBinPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "agy", "bin");
+        _geminiBinPath = Path.Combine(_userProfile, ".gemini", "bin");
     }
 
     private void Log(string message)
@@ -104,6 +111,15 @@ public class CliManagerService
                     {
                         cli.StatusMessage = "未ログイン ('gh auth login' が必要)";
                         Log($"[{cli.Name}] は未ログイン状態です ('gh auth status' 未認証)");
+                    }
+                }
+                else if (cli.CommandName.Equals("agy", StringComparison.OrdinalIgnoreCase))
+                {
+                    cli.IsLoggedIn = IsAntigravityAuthExists();
+                    if (!cli.IsLoggedIn)
+                    {
+                        cli.StatusMessage = "未ログイン ('agy' 認証が必要)";
+                        Log($"[{cli.Name}] は未ログイン状態です (~/.gemini 認証情報未検出)");
                     }
                 }
                 else if (cli.CommandName.Equals("gemini", StringComparison.OrdinalIgnoreCase))
@@ -248,6 +264,19 @@ public class CliManagerService
                 }
                 return true;
             }
+            else if (cli.CommandName.Equals("agy", StringComparison.OrdinalIgnoreCase))
+            {
+                Log("[Antigravity] Antigravity CLIコンソールを起動します...");
+                var agyExe = FindExecutable("agy") ?? "agy";
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/c start \"Antigravity Login\" cmd.exe /k \"\"{agyExe}\"\"",
+                    UseShellExecute = true
+                };
+                Process.Start(psi);
+                return true;
+            }
             else if (cli.CommandName.Equals("gemini", StringComparison.OrdinalIgnoreCase))
             {
                 Log("[Gemini] Gemini認証コンソールを起動します...");
@@ -286,7 +315,13 @@ public class CliManagerService
             string command;
             string args;
 
-            if (cli.CommandName == "grok")
+            if (cli.CommandName == "agy")
+            {
+                // Antigravity CLI 公式インストーラ
+                command = "powershell.exe";
+                args = "-NoProfile -ExecutionPolicy Bypass -Command \"irm https://antigravity.google/cli/install.ps1 | iex\"";
+            }
+            else if (cli.CommandName == "grok")
             {
                 // grokのインストーラ
                 command = "powershell.exe";
@@ -336,7 +371,13 @@ public class CliManagerService
             string command;
             string args;
 
-            if (cli.CommandName == "grok")
+            if (cli.CommandName == "agy")
+            {
+                var agyExe = FindExecutable("agy") ?? "agy";
+                command = "cmd.exe";
+                args = $"/c \"\"{agyExe}\" update\"";
+            }
+            else if (cli.CommandName == "grok")
             {
                 command = "cmd.exe";
                 args = "/c grok update";
@@ -383,6 +424,10 @@ public class CliManagerService
         // 1. 典型的なパスの直接チェック (高速: 数ミリ秒)
         var possiblePaths = new[]
         {
+            Path.Combine(_agyBinPath, $"{commandName}.exe"),
+            Path.Combine(_agyBinPath, $"{commandName}"),
+            Path.Combine(_geminiBinPath, $"{commandName}.exe"),
+            Path.Combine(_geminiBinPath, $"{commandName}"),
             Path.Combine(_npmGlobalPath, $"{commandName}.cmd"),
             Path.Combine(_npmGlobalPath, $"{commandName}.ps1"),
             Path.Combine(_npmGlobalPath, $"{commandName}"),
@@ -433,7 +478,8 @@ public class CliManagerService
     {
         try
         {
-            var result = await RunProcessAsync("cmd.exe", $"/c {commandName} --version", cliName ?? commandName);
+            var exe = FindExecutable(commandName) ?? commandName;
+            var result = await RunProcessAsync("cmd.exe", $"/c \"\"{exe}\" --version\"", cliName ?? commandName);
             if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
             {
                 var match = Regex.Match(result.Output, @"\d+\.\d+(\.\d+)?(-[a-zA-Z0-9.]+)?");
@@ -450,6 +496,31 @@ public class CliManagerService
 
     private async Task<string> GetLatestVersionAsync(CliInfo cli)
     {
+        if (cli.CommandName == "agy")
+        {
+            try
+            {
+                // 公式自動アップデータマニフェストから最新バージョンを取得
+                var manifestUrl = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/windows_amd64.json";
+                using var response = await HttpClient.GetAsync(manifestUrl);
+                if (response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("version", out var verProp))
+                    {
+                        var ver = verProp.GetString();
+                        if (!string.IsNullOrWhiteSpace(ver))
+                        {
+                            return ver.Trim();
+                        }
+                    }
+                }
+            }
+            catch { }
+            return "";
+        }
+
         if (cli.CommandName == "grok")
         {
             return ""; // grok update で自己判定
@@ -544,5 +615,23 @@ public class CliManagerService
         process.BeginErrorReadLine();
 
         return await tcs.Task;
+    }
+
+    public static bool IsAntigravityAuthExists()
+    {
+        try
+        {
+            var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var geminiDir = Path.Combine(userProfile, ".gemini");
+            var oauthFile = Path.Combine(geminiDir, "oauth_creds.json");
+            var accountsFile = Path.Combine(geminiDir, "google_accounts.json");
+            var cliSettings = Path.Combine(geminiDir, "antigravity-cli", "settings.json");
+
+            return File.Exists(oauthFile) || File.Exists(accountsFile) || File.Exists(cliSettings);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

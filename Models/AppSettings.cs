@@ -7,8 +7,8 @@ public class AppSettings
     public List<string> DisplayOrder { get; set; } = new()
     {
         "GPT/Codex",
-        "Claude",
         "Gemini",
+        "Claude",
         "Grok",
         "Copilot"
     };
