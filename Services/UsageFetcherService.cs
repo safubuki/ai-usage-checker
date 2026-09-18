@@ -11,6 +11,7 @@ namespace AIUsageChecker.Services;
 
 public class UsageFetcherService
 {
+    private readonly AgyQuotaClient _agyClient = new();
     private readonly LanguageServerQuotaClient _quotaClient = new();
     private readonly CodexQuotaClient _codexClient = new();
     private readonly CopilotQuotaClient _copilotClient = new();
@@ -32,6 +33,7 @@ public class UsageFetcherService
         if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
         _cacheFilePath = Path.Combine(dir, "quota_cache.json");
 
+        _agyClient.LogOutputReceived += msg => LogOutputReceived?.Invoke(msg);
         _codexClient.LogOutputReceived += msg => LogOutputReceived?.Invoke(msg);
         _copilotClient.LogOutputReceived += msg => LogOutputReceived?.Invoke(msg);
         _claudeClient.LogOutputReceived += msg => LogOutputReceived?.Invoke(msg);
@@ -96,7 +98,16 @@ public class UsageFetcherService
         {
             try
             {
-                var groups = await _quotaClient.FetchQuotaSummaryAsync();
+                // 1. Antigravity CLI ('agy') からの直接取得を優先試行
+                var groups = await _agyClient.FetchQuotaSummaryAsync();
+
+                // 2. CLI から取得できなかった場合は起動中の IDE 言語サーバーをフォールバックとして試行
+                if (groups == null || groups.Count == 0)
+                {
+                    LogOutputReceived?.Invoke("[Antigravity] CLIより取得できなかったため、IDE言語サーバーをフォールバック確認します...");
+                    groups = await _quotaClient.FetchQuotaSummaryAsync();
+                }
+
                 if (groups != null && groups.Count > 0)
                 {
                     _cachedGroups = groups;
@@ -105,7 +116,7 @@ public class UsageFetcherService
             }
             catch (Exception ex)
             {
-                LogOutputReceived?.Invoke($"[Antigravity] LanguageServer取得例外: {ex.Message}");
+                LogOutputReceived?.Invoke($"[Antigravity] クォータ取得例外: {ex.Message}");
             }
         });
 
@@ -406,7 +417,7 @@ public class UsageFetcherService
             item.CliInfo.IsLoggedIn = true;
             item.CliInfo.IsSubscribed = true;
             item.CliInfo.StatusMessage = "Google DeepMind 連携稼働中";
-            LogOutputReceived?.Invoke($"[Antigravity] 言語サーバーより取得: 5h枠={item.PrimaryLimit.RemainingPercent:F0}%, 週次枠={item.SecondaryLimit?.RemainingPercent:F0}%");
+            LogOutputReceived?.Invoke($"[Antigravity] クォータ適用完了: 5h枠={item.PrimaryLimit.RemainingPercent:F0}%, 週次枠={item.SecondaryLimit?.RemainingPercent:F0}%");
 
             item.AllLimits.Clear();
             item.AllLimits.Add(item.PrimaryLimit);

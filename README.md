@@ -70,7 +70,7 @@
    - **Claude**:
      - **未契約時**: 「未契約」グレーバッジおよび「--」ゲージの単一枠として表示。
      - **契約時（Claude Pro / Max / Team等）**: `~/.claude.json` のクォータ（`five_hour` および `seven_day`）を検知し、**自動的に5時間制限＋週次制限のダブル表示へと昇格・機能**します。
-   - **Gemini**: 5時間制限 ＋ 週次制限（Google DeepMind Antigravity CLI 'agy' / 言語サーバー連携）
+   - **Gemini**: 5時間制限 ＋ 週次制限（Google DeepMind Antigravity CLI 'agy' 直接連携 / 言語サーバーフォールバック）
    - **Grok**: SuperGrok Weekly limit（週次単一制限）
    - **GitHub Copilot**:
      - **年間契約（維持環境等）**: **「プレミアム要求」**（単位: 要求/回、例: `2% 使用済み (残 294 / 300)`）として正確に表示。
@@ -78,7 +78,7 @@
 3. **リセット時間フォーマットの完全統一**
    - 24時間以内の短期制限（5時間枠など）は全て **`HH:mm リセット`**、24時間以上の長期枠は **`MM/dd HH:mm リセット`** で統一され、直感的に把握できます。
 4. **実データ・生API連携**
-   - モックではなく、ローカルの認証トークン（Codex `auth.json`、Claude `~/.claude.json`）や GitHub CLI（`gh api /copilot_internal/user`）、言語サーバーRPCから実際の生クォータを直接取得します。
+   - モックではなく、ローカルの認証トークン（Codex `auth.json`、Claude `~/.claude.json`）や GitHub CLI（`gh api /copilot_internal/user`）、Antigravity CLI（`agy -p "/usage"`）から実際の生クォータを直接取得します。
 5. **カードの自由な並び替え（◀ ▶）**
    - 各カード下の「◀」「▶」ボタンで、よく使うAIサービスをお好みの順序に並び替え可能。設定は次回起動時にも自動保存されます。
 6. **最前面固定（ピン留め 📌）**
@@ -94,7 +94,7 @@
 |---|---|---|---|
 | **GPT** | OpenAI Codex (`codex`) | プラン動的判定<br>・Plus等: 5時間制限 + 週次制限 + 予備枠<br>・Pro等: 週次制限のみ（自動判定） | Codex認証トークン経由 生API直接取得 |
 | **Claude** | Anthropic (`claude`) | 契約時: 5時間制限 + 週次制限<br>未契約時: 契約ステータス | `~/.claude.json` / Claude CLI 連携 |
-| **Gemini** | Google DeepMind (Antigravity CLI: `agy`) | 5時間制限 + 週次制限（外部モデル枠対応） | Antigravity 言語サーバー連携 |
+| **Gemini** | Google DeepMind (Antigravity CLI: `agy`) | 5時間制限 + 週次制限（外部モデル枠対応） | Antigravity CLI (`agy -p "/usage"`) 直接取得 |
 | **Grok** | xAI (`grok`) | 週次制限 (SuperGrok) | Grok CLI / 利用状況判定 |
 | **Copilot** | GitHub Copilot (`copilot`) | 契約形態自動判定<br>・年間契約: プレミアム要求 (要求/回)<br>・一般/月間: AI Credits (Credits) | GitHub CLI (`gh api`) 直接連携 |
 

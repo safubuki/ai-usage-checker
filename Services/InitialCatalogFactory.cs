@@ -86,7 +86,7 @@ public static class InitialCatalogFactory
                     Name = "Gemini (agy)",
                     CommandName = "agy",
                     PackageName = "antigravity-cli",
-                    UsageCheckCommand = "agy (Language Server)",
+                    UsageCheckCommand = "agy -p \"/usage\"",
                     StatusMessage = "利用状況を確認中..."
                 },
                 PrimaryLimit = new UsageLimitInfo
