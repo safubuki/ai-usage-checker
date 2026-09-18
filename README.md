@@ -114,24 +114,29 @@
 
 ### 1. リポジトリのクローン
 ```bash
-git clone https://github.com/your-username/ai-usage-checker.git
+git clone https://github.com/safubuki/ai-usage-checker.git
 cd ai-usage-checker
 ```
 
-### 2. ビルド & 実行
+### 2. ワンクリックでビルド & 発行 (推奨)
+リポジトリ直下の **`publish.bat`** をダブルクリック（またはコマンド実行）するだけで、Windows 11 に最適化された単一実行ファイルが自動生成されます。
 
-```bash
-# 通常起動 (推奨)
-dotnet run
-
-# リリース用 単一実行ファイルの発行 (Windows 11 スマート アプリ コントロール対応)
-# publish.bat をダブルクリックするか、以下のコマンドを実行:
-dotnet publish -c Release -r win-x64 --self-contained false -o bin\Release\publish
+```cmd
+# コマンドプロンプト / PowerShell から実行する場合
+publish.bat
 ```
+
+ビルド完了後、出力された **`bin\Release\publish\AIUsageChecker.exe`** をダブルクリックして起動します。
+
 > [!TIP]
-> **Windows 11 で「このアプリの一部がブロックされています (AIUsageChecker.dll)」と表示される場合**:
-> Windows 11 の「スマート アプリ コントロール (SAC)」が未署名の個別 DLL ロードを検知したことによる警告です。
-> 上記の `publish.bat` で発行した **`bin\Release\publish\AIUsageChecker.exe`**（単一ファイル構成）を実行するか、Windows の「設定 > システム > 開発者向け > 開発者モード」をオンにすることで回避できます。
+> **Windows 11 のスマート アプリ コントロール (SAC) 対応**:
+> `publish.bat` は単一実行ファイル（Single-File）形式で出力するため、未署名 DLL のロードによる Windows 11 のブロック警告（`AIUsageChecker.dll` のブロック等）を回避して安定して起動できます。
+
+### 3. 開発用 (dotnet CLI での直接実行)
+開発・デバッグ用途でソースコードから直接起動したい場合は以下を使用します:
+```bash
+dotnet run
+```
 
 ---
 
