@@ -24,6 +24,8 @@ public class GrokQuotaData
     public double PrepaidBalance { get; set; }
     public double OnDemandUsed { get; set; }
     public string ErrorMessage { get; set; } = "";
+    public bool IsFromFallback { get; set; }
+    public DateTime? SourceTimestamp { get; set; }
 }
 
 public class GrokQuotaClient
@@ -51,8 +53,6 @@ public class GrokQuotaClient
             if (!File.Exists(authFilePath))
             {
                 LogOutputReceived?.Invoke("[Grok] ~/.grok/auth.json が見つかりません（未ログインまたはGrok CLI未インストール）");
-                var fallback = TryFallbackFromLog();
-                if (fallback != null) return fallback;
                 return new GrokQuotaData { IsSuccess = false, IsAuthRequired = true, ErrorMessage = "未ログイン ('grok' ログインが必要)" };
             }
 
@@ -179,13 +179,20 @@ public class GrokQuotaClient
                 return null;
             }
 
-            var result = new GrokQuotaData { IsSuccess = true };
+            var result = new GrokQuotaData();
 
-            if (configElem.TryGetProperty("creditUsagePercent", out var cupElem))
+            if (configElem.TryGetProperty("creditUsagePercent", out var cupElem) && cupElem.TryGetDouble(out var usedPercent))
             {
-                result.UsedPercent = cupElem.GetDouble();
+                result.UsedPercent = usedPercent;
                 result.RemainingPercent = Math.Max(0.0, 100.0 - result.UsedPercent);
             }
+            else
+            {
+                LogOutputReceived?.Invoke("[Grok] クォータ応答に利用率情報がありません。取得エラーとして扱います");
+                return null;
+            }
+
+            result.IsSuccess = true;
 
             if (configElem.TryGetProperty("subscriptionTier", out var stElem))
             {
@@ -347,6 +354,8 @@ public class GrokQuotaClient
                 var data = ParseBillingJson(fallbackJson);
                 if (data != null)
                 {
+                    data.IsFromFallback = true;
+                    data.SourceTimestamp = File.GetLastWriteTime(logPath);
                     LogOutputReceived?.Invoke("[Grok] ローカルログから最新の利用枠情報を復元しました");
                     return data;
                 }

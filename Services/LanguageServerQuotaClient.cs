@@ -172,13 +172,19 @@ public class LanguageServerQuotaClient
                         {
                             foreach (var b in bucketsElem.EnumerateArray())
                             {
+                                if (!b.TryGetProperty("remainingFraction", out var remainingElem) ||
+                                    !remainingElem.TryGetDouble(out var remainingFraction))
+                                {
+                                    continue;
+                                }
+
                                 var bucket = new QuotaBucket
                                 {
                                     BucketId = b.TryGetProperty("bucketId", out var bid) ? bid.GetString() ?? "" : "",
                                     DisplayName = b.TryGetProperty("displayName", out var dn) ? dn.GetString() ?? "" : "",
                                     Description = b.TryGetProperty("description", out var bdesc) ? bdesc.GetString() ?? "" : "",
                                     Window = b.TryGetProperty("window", out var win) ? win.GetString() ?? "" : "",
-                                    RemainingFraction = b.TryGetProperty("remainingFraction", out var rf) ? rf.GetDouble() : 1.0,
+                                    RemainingFraction = remainingFraction,
                                     ResetTime = b.TryGetProperty("resetTime", out var rt) ? rt.GetString() ?? "" : ""
                                 };
                                 group.Buckets.Add(bucket);

@@ -23,6 +23,16 @@ public class UsageFetcherService
     private CopilotQuotaData? _lastCopilotData;
     private ClaudeQuotaData? _lastClaudeData;
     private GrokQuotaData? _lastGrokData;
+    private bool _codexDataIsStale;
+    private bool _claudeDataIsStale;
+    private bool _geminiDataIsStale;
+    private bool _copilotDataIsStale;
+    private bool _grokDataIsStale;
+    private DateTime? _codexLastSuccessAt;
+    private DateTime? _claudeLastSuccessAt;
+    private DateTime? _geminiLastSuccessAt;
+    private DateTime? _copilotLastSuccessAt;
+    private DateTime? _grokLastSuccessAt;
 
     public event Action<string>? LogOutputReceived;
 
@@ -64,16 +74,23 @@ public class UsageFetcherService
                 if (data != null && data.IsSuccess)
                 {
                     _lastCodexData = data;
-                    SaveCache();
+                    _codexDataIsStale = false;
+                    _codexLastSuccessAt = DateTime.Now;
                 }
                 else if (data != null && data.IsAuthRequired)
                 {
                     // 認証切れ・未ログインが判明した場合はキャッシュに頼らず未ログイン状態を設定
                     _lastCodexData = data;
+                    _codexDataIsStale = false;
+                }
+                else
+                {
+                    _codexDataIsStale = true;
                 }
             }
             catch (Exception ex)
             {
+                _codexDataIsStale = true;
                 LogOutputReceived?.Invoke($"[Codex] 取得例外: {ex.Message}");
             }
         });
@@ -82,14 +99,34 @@ public class UsageFetcherService
         {
             try
             {
-                _lastClaudeData = await _claudeClient.FetchClaudeQuotaAsync();
-                if (_lastClaudeData?.IsSubscribed == true)
+                var data = await _claudeClient.FetchClaudeQuotaAsync();
+                if (data.IsSuccess)
                 {
-                    SaveCache();
+                    _lastClaudeData = data;
+                    _claudeDataIsStale = false;
+                    _claudeLastSuccessAt = DateTime.Now;
+                }
+                else if (data.IsAuthRequired)
+                {
+                    _lastClaudeData = data;
+                    _claudeDataIsStale = false;
+                }
+                else
+                {
+                    if (_lastClaudeData?.IsSuccess == true)
+                    {
+                        _claudeDataIsStale = true;
+                    }
+                    else
+                    {
+                        _lastClaudeData = data;
+                        _claudeDataIsStale = true;
+                    }
                 }
             }
             catch (Exception ex)
             {
+                _claudeDataIsStale = true;
                 LogOutputReceived?.Invoke($"[Claude] 取得例外: {ex.Message}");
             }
         });
@@ -102,20 +139,26 @@ public class UsageFetcherService
                 var groups = await _agyClient.FetchQuotaSummaryAsync();
 
                 // 2. CLI から取得できなかった場合は起動中の IDE 言語サーバーをフォールバックとして試行
-                if (groups == null || groups.Count == 0)
+                if (!HasUsableGeminiQuota(groups))
                 {
                     LogOutputReceived?.Invoke("[Antigravity] CLIより取得できなかったため、IDE言語サーバーをフォールバック確認します...");
                     groups = await _quotaClient.FetchQuotaSummaryAsync();
                 }
 
-                if (groups != null && groups.Count > 0)
+                if (HasUsableGeminiQuota(groups))
                 {
                     _cachedGroups = groups;
-                    SaveCache();
+                    _geminiDataIsStale = false;
+                    _geminiLastSuccessAt = DateTime.Now;
+                }
+                else
+                {
+                    _geminiDataIsStale = true;
                 }
             }
             catch (Exception ex)
             {
+                _geminiDataIsStale = true;
                 LogOutputReceived?.Invoke($"[Antigravity] クォータ取得例外: {ex.Message}");
             }
         });
@@ -124,14 +167,26 @@ public class UsageFetcherService
         {
             try
             {
-                _lastCopilotData = await _copilotClient.FetchCopilotQuotaAsync();
-                if (_lastCopilotData?.IsSuccess == true)
+                var data = await _copilotClient.FetchCopilotQuotaAsync();
+                if (data?.IsSuccess == true)
                 {
-                    SaveCache();
+                    _lastCopilotData = data;
+                    _copilotDataIsStale = false;
+                    _copilotLastSuccessAt = DateTime.Now;
+                }
+                else if (data?.IsAuthRequired == true)
+                {
+                    _lastCopilotData = data;
+                    _copilotDataIsStale = false;
+                }
+                else
+                {
+                    _copilotDataIsStale = true;
                 }
             }
             catch (Exception ex)
             {
+                _copilotDataIsStale = true;
                 LogOutputReceived?.Invoke($"[Copilot] 取得例外: {ex.Message}");
             }
         });
@@ -140,53 +195,113 @@ public class UsageFetcherService
         {
             try
             {
-                _lastGrokData = await _grokClient.FetchGrokQuotaAsync();
-                if (_lastGrokData?.IsSuccess == true)
+                var data = await _grokClient.FetchGrokQuotaAsync();
+                if (data?.IsSuccess == true)
                 {
-                    SaveCache();
+                    _lastGrokData = data;
+                    _grokDataIsStale = data.IsFromFallback;
+                    if (data.IsFromFallback)
+                    {
+                        _grokLastSuccessAt ??= data.SourceTimestamp;
+                    }
+                    else
+                    {
+                        _grokLastSuccessAt = DateTime.Now;
+                    }
+                }
+                else if (data?.IsAuthRequired == true)
+                {
+                    _lastGrokData = data;
+                    _grokDataIsStale = false;
+                }
+                else
+                {
+                    _grokDataIsStale = true;
                 }
             }
             catch (Exception ex)
             {
+                _grokDataIsStale = true;
                 LogOutputReceived?.Invoke($"[Grok] 取得例外: {ex.Message}");
             }
         });
 
         await Task.WhenAll(codexTask, claudeTask, geminiTask, copilotTask, grokTask);
+        await Task.Run(SaveCache);
         LogOutputReceived?.Invoke($"[{DateTime.Now:HH:mm:ss}] 全AI利用状況の生データ取得完了。");
     }
 
     public void ApplyUsage(AiUsageItem item)
     {
         var groups = _cachedGroups;
+        bool hasUsageError = IsUsingStaleData(item.ServiceType);
+        item.CliInfo.HasUsageError = hasUsageError;
 
-        switch (item.ServiceType)
+        if (hasUsageError)
         {
-            case AiServiceType.GPT:
-                ApplyGptQuota(item);
-                break;
-            case AiServiceType.Gemini:
-                ApplyGeminiQuota(item, groups);
-                break;
-            case AiServiceType.Claude:
-                ApplyClaudeQuota(item);
-                break;
-            case AiServiceType.Grok:
-                ApplyGrokQuota(item);
-                break;
-            case AiServiceType.Copilot:
-                ApplyCopilotQuota(item);
-                break;
-            case AiServiceType.Settings:
-                ApplySettingsStatus(item);
-                break;
+            ApplyUsageError(item);
+        }
+        else
+        {
+            switch (item.ServiceType)
+            {
+                case AiServiceType.GPT:
+                    ApplyGptQuota(item);
+                    break;
+                case AiServiceType.Gemini:
+                    ApplyGeminiQuota(item, groups);
+                    break;
+                case AiServiceType.Claude:
+                    ApplyClaudeQuota(item);
+                    break;
+                case AiServiceType.Grok:
+                    ApplyGrokQuota(item);
+                    break;
+                case AiServiceType.Copilot:
+                    ApplyCopilotQuota(item);
+                    break;
+                case AiServiceType.Settings:
+                    ApplySettingsStatus(item);
+                    break;
+            }
         }
 
         item.IsDataLoaded = true;
         item.PrimaryLimit.RefreshDisplay();
         item.SecondaryLimit?.RefreshDisplay();
         item.UpdateStatusAndCheckRecovery();
-        item.LastRefreshed = DateTime.Now;
+        item.LastRefreshed = hasUsageError
+            ? GetLastSuccessfulRefresh(item.ServiceType) ?? item.LastRefreshed
+            : DateTime.Now;
+    }
+
+    private static void ApplyUsageError(AiUsageItem item)
+    {
+        if (item.CliInfo.IsInstalled && item.CliInfo.IsLoggedIn)
+        {
+            item.CliInfo.StatusMessage = "利用枠の取得エラー (次回更新で再試行)";
+        }
+
+        ResetLimitForError(item.PrimaryLimit);
+        if (item.SecondaryLimit != null)
+        {
+            ResetLimitForError(item.SecondaryLimit);
+        }
+
+        item.AllLimits.Clear();
+        item.AllLimits.Add(item.PrimaryLimit);
+        if (item.SecondaryLimit != null)
+        {
+            item.AllLimits.Add(item.SecondaryLimit);
+        }
+    }
+
+    private static void ResetLimitForError(UsageLimitInfo limit)
+    {
+        limit.LimitDescription = "取得エラー";
+        limit.RemainingPercent = 0.0;
+        limit.CustomDisplayPercentText = "--";
+        limit.ResetTimeText = "再試行待ち";
     }
 
     public async Task FetchUsageAsync(AiUsageItem item)
@@ -302,7 +417,7 @@ public class UsageFetcherService
 
     private void ApplyClaudeQuota(AiUsageItem item)
     {
-        if (_lastClaudeData != null && _lastClaudeData.IsSubscribed)
+        if (_lastClaudeData?.IsSuccess == true && _lastClaudeData.IsSubscribed)
         {
             // 契約中（Claude Pro / Max / Team等）
             item.CliInfo.IsSubscribed = true;
@@ -356,16 +471,23 @@ public class UsageFetcherService
         }
         else
         {
-            // 未契約または未ログイン
+            // 未契約、未ログイン、または初回の一時的な取得失敗
             bool isConfigExists = ClaudeQuotaClient.IsConfigExists();
+            bool isTemporaryFailure = isConfigExists && _lastClaudeData?.IsSuccess == false && _lastClaudeData.IsAuthRequired == false;
             item.CliInfo.IsLoggedIn = isConfigExists;
-            item.CliInfo.IsSubscribed = false;
+            item.CliInfo.IsSubscribed = isTemporaryFailure;
 
             item.PrimaryLimit.Title = "契約ステータス";
             item.PrimaryLimit.RemainingPercent = 0.0;
             item.PrimaryLimit.CustomDisplayPercentText = "--";
 
-            if (!isConfigExists)
+            if (isTemporaryFailure)
+            {
+                item.PrimaryLimit.LimitDescription = "Claude 利用枠の取得待機中";
+                item.PrimaryLimit.ResetTimeText = "取得待機";
+                item.CliInfo.StatusMessage = "Claude 接続待機中 (通信・形式エラー)";
+            }
+            else if (!isConfigExists)
             {
                 item.PrimaryLimit.LimitDescription = "Claude 未ログイン ('claude login' で連携)";
                 item.PrimaryLimit.ResetTimeText = "要ログイン";
@@ -402,19 +524,32 @@ public class UsageFetcherService
                 item.PrimaryLimit.RemainingPercent = fiveHourBucket.RemainingFraction * 100.0;
                 item.PrimaryLimit.CustomDisplayPercentText = null;
                 item.PrimaryLimit.ResetTimeText = FormatResetTime(fiveHourBucket.ResetTime, "リセット");
-            }
 
-            if (weeklyBucket != null)
+                if (weeklyBucket != null)
+                {
+                    if (item.SecondaryLimit == null) item.SecondaryLimit = new UsageLimitInfo();
+                    item.SecondaryLimit.Title = "週次制限";
+                    item.SecondaryLimit.LimitDescription = !string.IsNullOrEmpty(weeklyBucket.Description) ? weeklyBucket.Description : "Weekly Limit Remaining";
+                    item.SecondaryLimit.RemainingPercent = weeklyBucket.RemainingFraction * 100.0;
+                    item.SecondaryLimit.CustomDisplayPercentText = null;
+                    item.SecondaryLimit.ResetTimeText = FormatResetTime(weeklyBucket.ResetTime, "リセット");
+                }
+                else
+                {
+                    item.SecondaryLimit = null;
+                }
+            }
+            else if (weeklyBucket != null)
             {
-                if (item.SecondaryLimit == null) item.SecondaryLimit = new UsageLimitInfo();
-                item.SecondaryLimit.Title = "週次制限";
-                item.SecondaryLimit.LimitDescription = !string.IsNullOrEmpty(weeklyBucket.Description) ? weeklyBucket.Description : "Weekly Limit Remaining";
-                item.SecondaryLimit.RemainingPercent = weeklyBucket.RemainingFraction * 100.0;
-                item.SecondaryLimit.CustomDisplayPercentText = null;
-                item.SecondaryLimit.ResetTimeText = FormatResetTime(weeklyBucket.ResetTime, "リセット");
+                item.PrimaryLimit.Title = "週次制限";
+                item.PrimaryLimit.LimitDescription = !string.IsNullOrEmpty(weeklyBucket.Description) ? weeklyBucket.Description : "Weekly Limit Remaining";
+                item.PrimaryLimit.RemainingPercent = weeklyBucket.RemainingFraction * 100.0;
+                item.PrimaryLimit.CustomDisplayPercentText = null;
+                item.PrimaryLimit.ResetTimeText = FormatResetTime(weeklyBucket.ResetTime, "リセット");
+                item.SecondaryLimit = null;
             }
 
-            item.CliInfo.IsLoggedIn = true;
+            item.CliInfo.IsLoggedIn = !_geminiDataIsStale || CliManagerService.IsAntigravityAuthExists();
             item.CliInfo.IsSubscribed = true;
             item.CliInfo.StatusMessage = "Google DeepMind 連携稼働中";
             LogOutputReceived?.Invoke($"[Antigravity] クォータ適用完了: 5h枠={item.PrimaryLimit.RemainingPercent:F0}%, 週次枠={item.SecondaryLimit?.RemainingPercent:F0}%");
@@ -501,7 +636,7 @@ public class UsageFetcherService
             }
             item.PrimaryLimit.LimitDescription = $"{_lastGrokData.UsedPercent:F0}% 使用済み (残 {_lastGrokData.RemainingPercent:F0}%){breakdown}";
 
-            item.CliInfo.IsLoggedIn = true;
+            item.CliInfo.IsLoggedIn = !_lastGrokData.IsFromFallback || GrokQuotaClient.IsAuthFileExists();
             item.CliInfo.IsSubscribed = true;
             item.CliInfo.StatusMessage = $"プラン: {_lastGrokData.PlanName} ({_lastGrokData.UsedPercent:F0}% 使用済)";
 
@@ -567,14 +702,18 @@ public class UsageFetcherService
             item.PrimaryLimit.Title = _lastCopilotData.QuotaTitle; // 年間契約: "プレミアム要求" / その他: "AI Credits"
             
             string unitSuffix = _lastCopilotData.IsYearlySubscriber ? "" : $" {_lastCopilotData.UnitName}";
-            item.PrimaryLimit.LimitDescription = $"{_lastCopilotData.UsedPercent:F0}% 使用済み (残 {_lastCopilotData.TotalCount - _lastCopilotData.UsedCount} / {_lastCopilotData.TotalCount}{unitSuffix})";
+            item.PrimaryLimit.LimitDescription = _lastCopilotData.TotalCount > 0
+                ? $"{_lastCopilotData.UsedPercent:F0}% 使用済み (残 {Math.Max(0, _lastCopilotData.TotalCount - _lastCopilotData.UsedCount)} / {_lastCopilotData.TotalCount}{unitSuffix})"
+                : $"{_lastCopilotData.UsedPercent:F0}% 使用済み (残 {_lastCopilotData.RemainingPercent:F0}%){unitSuffix}";
             item.PrimaryLimit.RemainingPercent = _lastCopilotData.RemainingPercent;
             item.PrimaryLimit.ResetTimeText = _lastCopilotData.ResetTimeText;
             item.PrimaryLimit.CustomDisplayPercentText = null;
 
             item.CliInfo.IsLoggedIn = true;
             item.CliInfo.IsSubscribed = true;
-            item.CliInfo.StatusMessage = $"プラン: Copilot Pro ({_lastCopilotData.RawResetNotice})";
+            item.CliInfo.StatusMessage = string.IsNullOrWhiteSpace(_lastCopilotData.RawResetNotice)
+                ? "プラン: Copilot Pro (稼働中)"
+                : $"プラン: Copilot Pro ({_lastCopilotData.RawResetNotice})";
 
             LogOutputReceived?.Invoke($"[Copilot] 反映完了: {item.PrimaryLimit.Title} {_lastCopilotData.UsedPercent:F0}%使用済み (残{_lastCopilotData.RemainingPercent:F0}%), リセット: {_lastCopilotData.ResetTimeText}");
         }
@@ -609,6 +748,45 @@ public class UsageFetcherService
 
         item.AllLimits.Clear();
         item.AllLimits.Add(item.PrimaryLimit);
+    }
+
+    private static bool HasUsableGeminiQuota(List<QuotaGroup>? groups)
+    {
+        var geminiGroup = groups?.FirstOrDefault(g =>
+            g.DisplayName.Contains("Gemini", StringComparison.OrdinalIgnoreCase));
+
+        return geminiGroup?.Buckets.Any(b =>
+            double.IsFinite(b.RemainingFraction) &&
+            (b.Window.Equals("5h", StringComparison.OrdinalIgnoreCase) ||
+             b.Window.Equals("weekly", StringComparison.OrdinalIgnoreCase) ||
+             b.DisplayName.Contains("Five Hour", StringComparison.OrdinalIgnoreCase) ||
+             b.DisplayName.Contains("Weekly", StringComparison.OrdinalIgnoreCase))) == true;
+    }
+
+    private bool IsUsingStaleData(AiServiceType serviceType)
+    {
+        return serviceType switch
+        {
+            AiServiceType.GPT => _codexDataIsStale,
+            AiServiceType.Claude => _claudeDataIsStale,
+            AiServiceType.Gemini => _geminiDataIsStale,
+            AiServiceType.Copilot => _copilotDataIsStale,
+            AiServiceType.Grok => _grokDataIsStale,
+            _ => false
+        };
+    }
+
+    private DateTime? GetLastSuccessfulRefresh(AiServiceType serviceType)
+    {
+        return serviceType switch
+        {
+            AiServiceType.GPT => _codexLastSuccessAt,
+            AiServiceType.Claude => _claudeLastSuccessAt,
+            AiServiceType.Gemini => _geminiLastSuccessAt,
+            AiServiceType.Copilot => _copilotLastSuccessAt,
+            AiServiceType.Grok => _grokLastSuccessAt,
+            _ => null
+        };
     }
 
     private string FormatResetTime(string isoTime, string suffix)
@@ -665,17 +843,50 @@ public class UsageFetcherService
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 {
                     _cachedGroups = JsonSerializer.Deserialize<List<QuotaGroup>>(json);
+                    if (HasUsableGeminiQuota(_cachedGroups))
+                    {
+                        _geminiDataIsStale = true;
+                        _geminiLastSuccessAt = File.GetLastWriteTime(_cacheFilePath);
+                    }
                 }
                 else if (doc.RootElement.ValueKind == JsonValueKind.Object)
                 {
                     var cache = JsonSerializer.Deserialize<AllQuotaCache>(json);
                     if (cache != null)
                     {
+                        var fallbackTimestamp = File.GetLastWriteTime(_cacheFilePath);
                         _cachedGroups = cache.GeminiGroups;
-                        if (cache.CodexData?.IsSuccess == true) _lastCodexData = cache.CodexData;
-                        if (cache.ClaudeData?.IsSubscribed == true) _lastClaudeData = cache.ClaudeData;
-                        if (cache.GrokData?.IsSuccess == true) _lastGrokData = cache.GrokData;
-                        if (cache.CopilotData?.IsSuccess == true) _lastCopilotData = cache.CopilotData;
+                        if (HasUsableGeminiQuota(_cachedGroups))
+                        {
+                            _geminiDataIsStale = true;
+                            _geminiLastSuccessAt = cache.GeminiFetchedAt ?? fallbackTimestamp;
+                        }
+                        if (cache.CodexData?.IsSuccess == true)
+                        {
+                            _lastCodexData = cache.CodexData;
+                            _codexDataIsStale = true;
+                            _codexLastSuccessAt = cache.CodexFetchedAt ?? fallbackTimestamp;
+                        }
+                        if (cache.ClaudeData?.IsSubscribed == true)
+                        {
+                            // 旧形式のキャッシュにはIsSuccessがないため、契約済みデータは正常値として移行する。
+                            cache.ClaudeData.IsSuccess = true;
+                            _lastClaudeData = cache.ClaudeData;
+                            _claudeDataIsStale = true;
+                            _claudeLastSuccessAt = cache.ClaudeFetchedAt ?? fallbackTimestamp;
+                        }
+                        if (cache.GrokData?.IsSuccess == true)
+                        {
+                            _lastGrokData = cache.GrokData;
+                            _grokDataIsStale = true;
+                            _grokLastSuccessAt = cache.GrokFetchedAt ?? cache.GrokData.SourceTimestamp ?? fallbackTimestamp;
+                        }
+                        if (cache.CopilotData?.IsSuccess == true)
+                        {
+                            _lastCopilotData = cache.CopilotData;
+                            _copilotDataIsStale = true;
+                            _copilotLastSuccessAt = cache.CopilotFetchedAt ?? fallbackTimestamp;
+                        }
                     }
                 }
             }
@@ -693,12 +904,22 @@ public class UsageFetcherService
                 CodexData = _lastCodexData?.IsSuccess == true ? _lastCodexData : null,
                 ClaudeData = _lastClaudeData?.IsSubscribed == true ? _lastClaudeData : null,
                 GrokData = _lastGrokData?.IsSuccess == true ? _lastGrokData : null,
-                CopilotData = _lastCopilotData?.IsSuccess == true ? _lastCopilotData : null
+                CopilotData = _lastCopilotData?.IsSuccess == true ? _lastCopilotData : null,
+                GeminiFetchedAt = _geminiLastSuccessAt,
+                CodexFetchedAt = _codexLastSuccessAt,
+                ClaudeFetchedAt = _claudeLastSuccessAt,
+                GrokFetchedAt = _grokLastSuccessAt,
+                CopilotFetchedAt = _copilotLastSuccessAt
             };
             var json = JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_cacheFilePath, json);
+            var tempPath = _cacheFilePath + ".tmp";
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, _cacheFilePath, overwrite: true);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            LogOutputReceived?.Invoke($"[キャッシュ] 保存失敗: {ex.Message}");
+        }
     }
 }
 
@@ -709,4 +930,9 @@ public class AllQuotaCache
     public ClaudeQuotaData? ClaudeData { get; set; }
     public GrokQuotaData? GrokData { get; set; }
     public CopilotQuotaData? CopilotData { get; set; }
+    public DateTime? GeminiFetchedAt { get; set; }
+    public DateTime? CodexFetchedAt { get; set; }
+    public DateTime? ClaudeFetchedAt { get; set; }
+    public DateTime? GrokFetchedAt { get; set; }
+    public DateTime? CopilotFetchedAt { get; set; }
 }

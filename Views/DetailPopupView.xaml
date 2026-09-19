@@ -10,6 +10,7 @@
     <UserControl.Resources>
         <converters:RemainingToBrushConverter x:Key="RemainingToBrushConverter"/>
         <converters:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+        <converters:InverseBooleanConverter x:Key="InverseBooleanConverter"/>
         <converters:NullToVisibilityConverter x:Key="NullToVisibilityConverter"/>
         <converters:StatusBadgeBrushConverter x:Key="StatusBadgeBrushConverter"/>
         <converters:StatusBadgeTextBrushConverter x:Key="StatusBadgeTextBrushConverter"/>
@@ -161,6 +162,7 @@
                                         BorderThickness="0"
                                         Command="{Binding InstallCliCommand}"
                                         CommandParameter="{Binding SelectedItem}"
+                                        IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
                                         Cursor="Hand"
                                         Visibility="{Binding SelectedItem.CliInfo.IsInstalled, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=Inverse}">
                                     <Button.Resources>
@@ -178,6 +180,7 @@
                                         BorderThickness="0"
                                         Command="{Binding LoginCliCommand}"
                                         CommandParameter="{Binding SelectedItem}"
+                                        IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
                                         ToolTip="ブラウザまたはコンソールで認証画面を開き、利用枠データを連携します"
                                         Cursor="Hand">
                                     <Button.Style>
@@ -209,6 +212,7 @@
                                         BorderThickness="0"
                                         Command="{Binding UpdateCliCommand}"
                                         CommandParameter="{Binding SelectedItem}"
+                                        IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
                                         Cursor="Hand"
                                         Visibility="{Binding SelectedItem.CliInfo.HasUpdate, Converter={StaticResource BooleanToVisibilityConverter}}">
                                     <Button.Resources>
@@ -226,6 +230,7 @@
                                         BorderBrush="#374151" BorderThickness="1"
                                         Command="{Binding CheckCliCommand}"
                                         CommandParameter="{Binding SelectedItem}"
+                                        IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
                                         Cursor="Hand">
                                     <Button.Resources>
                                         <Style TargetType="Border">

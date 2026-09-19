@@ -12,6 +12,8 @@ namespace AIUsageChecker.Services;
 
 public class CliManagerService
 {
+    private static readonly TimeSpan BackgroundProbeTimeout = TimeSpan.FromSeconds(20);
+
     public event Action<string>? LogOutputReceived;
 
     private readonly string _userProfile;
@@ -479,7 +481,11 @@ public class CliManagerService
         try
         {
             var exe = FindExecutable(commandName) ?? commandName;
-            var result = await RunProcessAsync("cmd.exe", $"/c \"\"{exe}\" --version\"", cliName ?? commandName);
+            var result = await RunProcessAsync(
+                "cmd.exe",
+                $"/c \"\"{exe}\" --version\"",
+                cliName ?? commandName,
+                BackgroundProbeTimeout);
             if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
             {
                 var match = Regex.Match(result.Output, @"\d+\.\d+(\.\d+)?(-[a-zA-Z0-9.]+)?");
@@ -528,7 +534,11 @@ public class CliManagerService
 
         try
         {
-            var result = await RunProcessAsync("cmd.exe", $"/c npm view {cli.PackageName} version", cli.Name);
+            var result = await RunProcessAsync(
+                "cmd.exe",
+                $"/c npm view {cli.PackageName} version",
+                cli.Name,
+                BackgroundProbeTimeout);
             if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
             {
                 return result.Output.Trim();
@@ -556,7 +566,11 @@ public class CliManagerService
         return false;
     }
 
-    private async Task<(int ExitCode, string Output, string Error)> RunProcessAsync(string fileName, string args, string? prefix = null)
+    private async Task<(int ExitCode, string Output, string Error)> RunProcessAsync(
+        string fileName,
+        string args,
+        string? prefix = null,
+        TimeSpan? timeout = null)
     {
         var tcs = new TaskCompletionSource<(int, string, string)>();
 
@@ -614,7 +628,35 @@ public class CliManagerService
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        return await tcs.Task;
+        if (!timeout.HasValue)
+        {
+            return await tcs.Task;
+        }
+
+        var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(timeout.Value));
+        if (completedTask == tcs.Task)
+        {
+            return await tcs.Task;
+        }
+
+        var timeoutMessage = $"Timed out after {timeout.Value.TotalSeconds:F0} seconds";
+        Log(string.IsNullOrEmpty(prefix)
+            ? $"[timeout] {fileName}: {timeoutMessage}"
+            : $"[{prefix}] {timeoutMessage}");
+
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // タイムアウト結果は返し、終了処理はOSに任せる。
+        }
+
+        return (-2, stdout.ToString(), timeoutMessage);
     }
 
     public static bool IsAntigravityAuthExists()

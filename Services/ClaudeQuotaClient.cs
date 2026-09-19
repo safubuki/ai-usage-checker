@@ -8,6 +8,7 @@ namespace AIUsageChecker.Services;
 
 public class ClaudeQuotaData
 {
+    public bool IsSuccess { get; set; }
     public bool IsSubscribed { get; set; }
     public bool IsAuthRequired { get; set; }
     public string PlanName { get; set; } = "Claude";
@@ -114,6 +115,13 @@ public class ClaudeQuotaClient
                 }
             }
 
+            if (result.IsSubscribed && !result.HasFiveHourLimit && !result.HasWeeklyLimit)
+            {
+                result.StatusMessage = "利用枠情報を取得できませんでした";
+                LogOutputReceived?.Invoke("[Claude] 利用枠情報を解析できませんでした。取得エラーとして扱います");
+                return result;
+            }
+
             if (!result.IsSubscribed)
             {
                 result.StatusMessage = "未契約 (プラン未加入)";
@@ -125,6 +133,7 @@ public class ClaudeQuotaClient
                 LogOutputReceived?.Invoke($"[Claude] 契約中確認: プラン={result.PlanName}, 5h枠={result.FiveHourRemainingPercent:F0}% ({result.FiveHourResetText}), 週次枠={result.WeeklyRemainingPercent:F0}% ({result.WeeklyResetText})");
             }
 
+            result.IsSuccess = true;
             return result;
         }
         catch (Exception ex)

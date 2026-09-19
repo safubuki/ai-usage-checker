@@ -12,13 +12,13 @@ public class CopilotQuotaData
     public string PlanName { get; set; } = "Copilot Pro";
     public string QuotaTitle { get; set; } = "プレミアム要求";
     public string UnitName { get; set; } = "要求";
-    public bool IsYearlySubscriber { get; set; } = true;
-    public double RemainingPercent { get; set; } = 98.0;
-    public double UsedPercent { get; set; } = 2.0;
-    public int UsedCount { get; set; } = 6;
-    public int TotalCount { get; set; } = 300;
-    public string ResetTimeText { get; set; } = "10/01 09:00 リセット";
-    public string RawResetNotice { get; set; } = "10月1日 の 9:00 にリセットされます";
+    public bool IsYearlySubscriber { get; set; }
+    public double RemainingPercent { get; set; }
+    public double UsedPercent { get; set; }
+    public int UsedCount { get; set; }
+    public int TotalCount { get; set; }
+    public string ResetTimeText { get; set; } = "";
+    public string RawResetNotice { get; set; } = "";
 }
 
 public class CopilotQuotaClient
@@ -40,7 +40,11 @@ public class CopilotQuotaClient
             };
             using var proc = Process.Start(psi);
             if (proc == null) return false;
-            proc.WaitForExit(2500);
+            if (!proc.WaitForExit(2500))
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { }
+                return false;
+            }
             return proc.ExitCode == 0;
         }
         catch
@@ -75,7 +79,15 @@ public class CopilotQuotaClient
             var outputTask = proc.StandardOutput.ReadToEndAsync();
             var errorTask = proc.StandardError.ReadToEndAsync();
 
-            await proc.WaitForExitAsync();
+            var waitTask = proc.WaitForExitAsync();
+            if (await Task.WhenAny(waitTask, Task.Delay(TimeSpan.FromSeconds(20))) != waitTask)
+            {
+                try { proc.Kill(entireProcessTree: true); } catch { }
+                LogOutputReceived?.Invoke("[Copilot] gh api がタイムアウトしました (20秒)。次回更新で再試行します");
+                return new CopilotQuotaData { IsSuccess = false, IsAuthRequired = false };
+            }
+
+            await waitTask;
             var json = await outputTask;
             var error = await errorTask;
 
@@ -91,7 +103,7 @@ public class CopilotQuotaClient
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            var data = new CopilotQuotaData { IsSuccess = true };
+            var data = new CopilotQuotaData();
 
             // 1. 契約タイプ (access_type_sku) の判定
             string accessType = root.TryGetProperty("access_type_sku", out var atElem) ? (atElem.GetString() ?? "") : "";
@@ -128,6 +140,7 @@ public class CopilotQuotaClient
                     found = true;
                     data.QuotaTitle = "AI Credits";
                     data.UnitName = "Credits";
+                    data.IsYearlySubscriber = false;
                 }
                 else if (qsElem.TryGetProperty("credits", out var crElem))
                 {
@@ -135,15 +148,18 @@ public class CopilotQuotaClient
                     found = true;
                     data.QuotaTitle = "AI Credits";
                     data.UnitName = "Credits";
+                    data.IsYearlySubscriber = false;
                 }
             }
 
+            bool hasRemainingPercent = false;
             if (found)
             {
                 if (targetElem.TryGetProperty("percent_remaining", out var prElem))
                 {
                     data.RemainingPercent = Math.Round(prElem.GetDouble(), 1);
                     data.UsedPercent = Math.Round(Math.Max(0.0, 100.0 - data.RemainingPercent), 1);
+                    hasRemainingPercent = true;
                 }
 
                 if (targetElem.TryGetProperty("credits_used", out var cuElem))
@@ -157,6 +173,14 @@ public class CopilotQuotaClient
                 }
             }
 
+            if (!found || !hasRemainingPercent)
+            {
+                LogOutputReceived?.Invoke("[Copilot] クォータ応答に必要な利用率情報がありません。取得エラーとして扱います");
+                return new CopilotQuotaData { IsSuccess = false, IsAuthRequired = false };
+            }
+
+            data.IsSuccess = true;
+
             if (root.TryGetProperty("quota_reset_date_utc", out var resetElem) &&
                 DateTime.TryParse(resetElem.GetString(), null, System.Globalization.DateTimeStyles.AdjustToUniversal, out var dtUtc))
             {
@@ -165,7 +189,7 @@ public class CopilotQuotaClient
                 data.RawResetNotice = $"{dtLocal:M月d日 の H:mm} にリセットされます";
             }
 
-            string unitDisplay = isYearly ? "回" : " Credits";
+            string unitDisplay = data.IsYearlySubscriber ? "回" : " Credits";
             LogOutputReceived?.Invoke($"[Copilot] 取得成功: {data.QuotaTitle} {data.UsedPercent:F0}% 使用済み (残 {data.RemainingPercent:F0}% / {data.TotalCount - data.UsedCount}{unitDisplay}), リセット: {data.ResetTimeText}");
 
             return data;

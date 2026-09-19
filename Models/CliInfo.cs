@@ -17,6 +17,19 @@ public class CliInfo : ViewModelBase
     private string _usageCheckCommand = "";
     private bool _isSubscribed = true;
     private bool _isLoggedIn = true;
+    private bool _hasUsageError;
+
+    public bool HasUsageError
+    {
+        get => _hasUsageError;
+        set
+        {
+            if (SetProperty(ref _hasUsageError, value))
+            {
+                OnPropertyChanged(nameof(StatusBadgeText));
+            }
+        }
+    }
 
     public bool IsLoggedIn
     {
@@ -131,9 +144,10 @@ public class CliInfo : ViewModelBase
         get
         {
             if (IsBusy) return "確認中...";
-            if (!IsSubscribed) return "未契約";
             if (!IsInstalled) return "未導入";
             if (!IsLoggedIn) return "要ログイン";
+            if (HasUsageError) return "取得エラー";
+            if (!IsSubscribed) return "未契約";
             if (HasUpdate) return "更新あり";
             return "最新";
         }

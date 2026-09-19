@@ -37,6 +37,7 @@ public class StatusBadgeBrushConverter : IValueConverter
     {
         if (value is string text)
         {
+            if (text.Contains("エラー")) return RedBrush;
             if (text.Contains("最新")) return GreenBrush;
             if (text.Contains("更新")) return OrangeBrush;
             if (text.Contains("未契約")) return GrayBrush;
@@ -60,6 +61,7 @@ public class StatusBadgeTextBrushConverter : IValueConverter
     {
         if (value is string text)
         {
+            if (text.Contains("エラー")) return RedText;
             if (text.Contains("最新")) return GreenText;
             if (text.Contains("更新")) return OrangeText;
             if (text.Contains("未契約")) return GrayText;
@@ -85,6 +87,15 @@ public class BooleanToVisibilityConverter : IValueConverter
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => throw new NotImplementedException();
+}
+
+public class InverseBooleanConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is not bool flag || !flag;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is not bool flag || !flag;
 }
 
 public class NullToVisibilityConverter : IValueConverter

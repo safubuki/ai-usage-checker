@@ -10,6 +10,8 @@ namespace AIUsageChecker.ViewModels;
 
 public class MainViewModel : ViewModelBase
 {
+    private static readonly TimeSpan CliStatusRefreshInterval = TimeSpan.FromHours(6);
+
     private readonly CliManagerService _cliManager;
     private readonly UsageFetcherService _usageFetcher;
     private readonly SettingsService _settingsService;
@@ -26,6 +28,7 @@ public class MainViewModel : ViewModelBase
     private readonly List<LogEntry> _allLogEntries = new();
     private ObservableCollection<string> _consoleLogs = new();
     private bool _isShowAllLogs;
+    private DateTime _lastCliStatusRefreshUtc = DateTime.MinValue;
 
     public ObservableCollection<AiUsageItem> Items
     {
@@ -153,7 +156,7 @@ public class MainViewModel : ViewModelBase
         CloseDetailCommand = new RelayCommand(CloseDetail);
         InstallCliCommand = new RelayCommand<AiUsageItem>(async item =>
         {
-            if (item != null)
+            if (item != null && !item.CliInfo.IsBusy)
             {
                 await _cliManager.InstallCliAsync(item.CliInfo);
                 await _usageFetcher.FetchUsageAsync(item);
@@ -161,7 +164,7 @@ public class MainViewModel : ViewModelBase
         });
         LoginCliCommand = new RelayCommand<AiUsageItem>(async item =>
         {
-            if (item != null)
+            if (item != null && !item.CliInfo.IsBusy)
             {
                 var success = await _cliManager.LoginCliAsync(item.CliInfo);
                 if (success)
@@ -176,7 +179,7 @@ public class MainViewModel : ViewModelBase
         });
         UpdateCliCommand = new RelayCommand<AiUsageItem>(async item =>
         {
-            if (item != null)
+            if (item != null && !item.CliInfo.IsBusy)
             {
                 await _cliManager.UpdateCliAsync(item.CliInfo);
                 await _usageFetcher.FetchUsageAsync(item);
@@ -184,7 +187,7 @@ public class MainViewModel : ViewModelBase
         });
         CheckCliCommand = new RelayCommand<AiUsageItem>(async item =>
         {
-            if (item != null)
+            if (item != null && !item.CliInfo.IsBusy)
             {
                 await _cliManager.CheckCliStatusAsync(item.CliInfo);
                 await _usageFetcher.FetchUsageAsync(item);
@@ -223,7 +226,11 @@ public class MainViewModel : ViewModelBase
         {
             Interval = TimeSpan.FromMinutes(Math.Max(1, _settings.AutoRefreshMinutes))
         };
-        _autoRefreshTimer.Tick += async (_, _) => await RefreshAllAsync(isSilent: true);
+        _autoRefreshTimer.Tick += async (_, _) =>
+        {
+            var shouldCheckCliStatus = DateTime.UtcNow - _lastCliStatusRefreshUtc >= CliStatusRefreshInterval;
+            await RefreshAllAsync(isSilent: true, checkCliStatus: shouldCheckCliStatus);
+        };
         _autoRefreshTimer.Start();
 
         // データの初期化
@@ -353,7 +360,7 @@ public class MainViewModel : ViewModelBase
         _ = RefreshAllAsync(isSilent: false);
     }
 
-    public async Task RefreshAllAsync(bool isSilent = false)
+    public async Task RefreshAllAsync(bool isSilent = false, bool checkCliStatus = true)
     {
         if (IsRefreshing) return;
         IsRefreshing = true;
@@ -368,37 +375,49 @@ public class MainViewModel : ViewModelBase
         {
             // 既存カードのバッジを「確認中...」に戻さない（裏側で取得し、完了時にパッと切り替える）
 
-            // 1. 各カードのCLIチェック用の一時CliInfoを用意して並列実行
-            // （画面上のCliInfoを直接更新しないため、個別完了時にバッジがバラバラ変わらない）
-            var cliTasks = Items.Select(async item =>
+            List<Task<(AiUsageItem Item, CliInfo TempCli)>>? cliTasks = null;
+            if (checkCliStatus)
             {
-                var tempCli = new CliInfo
+                // CLIの探索・バージョン確認は起動時、手動更新時、および6時間ごとに限定する。
+                // 画面上のCliInfoを直接更新しないため、個別完了時にバッジがバラバラ変わらない。
+                cliTasks = Items.Select(async item =>
                 {
-                    Name = item.CliInfo.Name,
-                    CommandName = item.CliInfo.CommandName,
-                    PackageName = item.CliInfo.PackageName,
-                    UsageCheckCommand = item.CliInfo.UsageCheckCommand,
-                    IsSubscribed = item.CliInfo.IsSubscribed
-                };
-                await _cliManager.CheckCliStatusAsync(tempCli);
-                return (Item: item, TempCli: tempCli);
-            }).ToList();
+                    var tempCli = new CliInfo
+                    {
+                        Name = item.CliInfo.Name,
+                        CommandName = item.CliInfo.CommandName,
+                        PackageName = item.CliInfo.PackageName,
+                        UsageCheckCommand = item.CliInfo.UsageCheckCommand,
+                        IsSubscribed = item.CliInfo.IsSubscribed
+                    };
+                    await _cliManager.CheckCliStatusAsync(tempCli);
+                    return (Item: item, TempCli: tempCli);
+                }).ToList();
+            }
 
-            // 2. 利用状況（クォータ）生データをバックグラウンドで並列取得
+            // 利用状況（クォータ）は従来どおり5分ごとに取得する。
             var usageTask = _usageFetcher.FetchAllRawDataAsync();
 
-            // 3. 利用状況取得と全CLIチェックが「すべて完了」するまで待機
-            await Task.WhenAll(usageTask, Task.WhenAll(cliTasks));
-
-            // 4. 【全て確認完了】この瞬間に全カードへ一斉にデータを反映する！
-            var cliResults = await Task.WhenAll(cliTasks);
-            foreach (var res in cliResults)
+            if (cliTasks != null)
             {
-                // クォータデータ反映（%・リング・リセット日時・枠線判定）
-                _usageFetcher.ApplyUsage(res.Item);
+                await Task.WhenAll(usageTask, Task.WhenAll(cliTasks));
+                var cliResults = await Task.WhenAll(cliTasks);
+                foreach (var res in cliResults)
+                {
+                    // CLI状態を先に反映し、その後にプラン・利用枠状態を適用する。
+                    res.Item.CliInfo.CopyFrom(res.TempCli);
+                    _usageFetcher.ApplyUsage(res.Item);
+                }
 
-                // CLIステータス反映（最新・未契約・未導入等のバッジ）
-                res.Item.CliInfo.CopyFrom(res.TempCli);
+                _lastCliStatusRefreshUtc = DateTime.UtcNow;
+            }
+            else
+            {
+                await usageTask;
+                foreach (var item in Items)
+                {
+                    _usageFetcher.ApplyUsage(item);
+                }
             }
 
             StatusText = $"同期完了: {DateTime.Now:HH:mm:ss}";

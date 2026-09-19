@@ -193,6 +193,14 @@ public class CodexQuotaClient
                 }
             }
 
+            if (!result.HasFiveHourLimit && !result.HasWeeklyLimit)
+            {
+                result.IsSuccess = false;
+                result.ErrorMessage = "利用枠情報が応答に含まれていません";
+                LogOutputReceived?.Invoke("[Codex] 利用枠情報を解析できませんでした。取得エラーとして扱います");
+                return result;
+            }
+
             string limitSummary = result.HasFiveHourLimit && result.HasWeeklyLimit 
                 ? $"5h枠={result.FiveHourRemainingPercent:F0}% ({result.FiveHourResetText}), 週次枠={result.WeeklyRemainingPercent:F0}% ({result.WeeklyResetText})"
                 : result.HasWeeklyLimit 
