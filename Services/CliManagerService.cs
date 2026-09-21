@@ -481,11 +481,24 @@ public class CliManagerService
         try
         {
             var exe = FindExecutable(commandName) ?? commandName;
+            IReadOnlyDictionary<string, string>? probeEnvironment = commandName.ToLowerInvariant() switch
+            {
+                "agy" => new Dictionary<string, string>
+                {
+                    ["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true"
+                },
+                "grok" => new Dictionary<string, string>
+                {
+                    ["GROK_DISABLE_AUTOUPDATER"] = "1"
+                },
+                _ => null
+            };
             var result = await RunProcessAsync(
                 "cmd.exe",
                 $"/c \"\"{exe}\" --version\"",
                 cliName ?? commandName,
-                BackgroundProbeTimeout);
+                BackgroundProbeTimeout,
+                probeEnvironment);
             if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.Output))
             {
                 var match = Regex.Match(result.Output, @"\d+\.\d+(\.\d+)?(-[a-zA-Z0-9.]+)?");
@@ -570,7 +583,8 @@ public class CliManagerService
         string fileName,
         string args,
         string? prefix = null,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        IReadOnlyDictionary<string, string>? environmentVariables = null)
     {
         var tcs = new TaskCompletionSource<(int, string, string)>();
 
@@ -585,6 +599,14 @@ public class CliManagerService
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
+
+        if (environmentVariables != null)
+        {
+            foreach (var pair in environmentVariables)
+            {
+                psi.Environment[pair.Key] = pair.Value;
+            }
+        }
 
         var process = new Process { StartInfo = psi, EnableRaisingEvents = true };
         var stdout = new StringBuilder();

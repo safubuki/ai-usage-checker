@@ -114,6 +114,57 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
+
+                            <!-- Grok 等の主制限を消費した機能別内訳。独立した残量リングにはしない。 -->
+                            <Border Background="#0F1413"
+                                    BorderBrush="#26342E"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="8,6"
+                                    Margin="0,4,0,2"
+                                    Visibility="{Binding SelectedItem.HasUsageBreakdown, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,5">
+                                        <TextBlock Text="週次枠の内訳" FontSize="9.5" FontWeight="SemiBold" Foreground="#9CA3AF"/>
+                                        <TextBlock Text="使用率" FontSize="8.5" Foreground="#6B7280" HorizontalAlignment="Right"/>
+                                    </Grid>
+                                    <ItemsControl ItemsSource="{Binding SelectedItem.UsageBreakdown}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,2,0,3">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="90"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="52"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Title}"
+                                                               FontSize="9.5"
+                                                               Foreground="#D1D5DB"
+                                                               VerticalAlignment="Center"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               Margin="0,0,8,0"/>
+                                                    <ProgressBar Grid.Column="1"
+                                                                 Height="7"
+                                                                 Minimum="0"
+                                                                 Maximum="100"
+                                                                 Value="{Binding UsedAmount}"
+                                                                 Foreground="#3F9F75"
+                                                                 Background="#29302E"
+                                                                 BorderThickness="0"
+                                                                 VerticalAlignment="Center"/>
+                                                    <TextBlock Grid.Column="2"
+                                                               Text="{Binding UsedAmount, StringFormat={}{0:F0}% 使用}"
+                                                               FontSize="9.5"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="#F3F4F6"
+                                                               HorizontalAlignment="Right"
+                                                               VerticalAlignment="Center"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </Border>
 

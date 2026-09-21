@@ -629,12 +629,7 @@ public class UsageFetcherService
             item.PrimaryLimit.ResetTimeText = _lastGrokData.ResetTimeText;
             item.PrimaryLimit.CustomDisplayPercentText = null;
 
-            string breakdown = "";
-            if (_lastGrokData.GrokBuildPercent > 0 || _lastGrokData.GrokChatPercent > 0)
-            {
-                breakdown = $" [Build: {_lastGrokData.GrokBuildPercent:F0}%, Chat: {_lastGrokData.GrokChatPercent:F0}%]";
-            }
-            item.PrimaryLimit.LimitDescription = $"{_lastGrokData.UsedPercent:F0}% 使用済み (残 {_lastGrokData.RemainingPercent:F0}%){breakdown}";
+            item.PrimaryLimit.LimitDescription = $"{_lastGrokData.UsedPercent:F0}% 使用済み (残 {_lastGrokData.RemainingPercent:F0}%)";
 
             item.CliInfo.IsLoggedIn = !_lastGrokData.IsFromFallback || GrokQuotaClient.IsAuthFileExists();
             item.CliInfo.IsSubscribed = true;
@@ -644,28 +639,41 @@ public class UsageFetcherService
             item.AllLimits.Clear();
             item.AllLimits.Add(item.PrimaryLimit);
 
-            // 詳細ポップアップ向けに内訳を追加
-            if (_lastGrokData.GrokBuildPercent > 0 || _lastGrokData.GrokChatPercent > 0)
-            {
-                var buildLimit = new UsageLimitInfo
-                {
-                    Title = "Grok Build",
-                    RemainingPercent = Math.Max(0.0, 100.0 - _lastGrokData.GrokBuildPercent),
-                    LimitDescription = $"{_lastGrokData.GrokBuildPercent:F0}% 使用",
-                    ResetTimeText = _lastGrokData.ResetTimeText
-                };
-                buildLimit.RefreshDisplay();
-                item.AllLimits.Add(buildLimit);
+            // Build / Chat / Imagine などは独立した制限ではなく、週次枠を消費した機能別内訳。
+            item.UsageBreakdown.Clear();
+            var productUsage = _lastGrokData.ProductUsage ?? new List<GrokProductUsage>();
 
-                var chatLimit = new UsageLimitInfo
+            // 旧キャッシュからの移行時だけ、従来の固定フィールドを内訳へ復元する。
+            if (productUsage.Count == 0 && (_lastGrokData.GrokBuildPercent > 0 || _lastGrokData.GrokChatPercent > 0))
+            {
+                if (_lastGrokData.GrokBuildPercent > 0)
                 {
-                    Title = "チャット",
-                    RemainingPercent = Math.Max(0.0, 100.0 - _lastGrokData.GrokChatPercent),
-                    LimitDescription = $"{_lastGrokData.GrokChatPercent:F0}% 使用",
-                    ResetTimeText = _lastGrokData.ResetTimeText
-                };
-                chatLimit.RefreshDisplay();
-                item.AllLimits.Add(chatLimit);
+                    productUsage.Add(new GrokProductUsage
+                    {
+                        Product = "GrokBuild",
+                        DisplayName = "Grok Build",
+                        UsedPercent = _lastGrokData.GrokBuildPercent
+                    });
+                }
+                if (_lastGrokData.GrokChatPercent > 0)
+                {
+                    productUsage.Add(new GrokProductUsage
+                    {
+                        Product = "GrokChat",
+                        DisplayName = "チャット",
+                        UsedPercent = _lastGrokData.GrokChatPercent
+                    });
+                }
+            }
+
+            foreach (var product in productUsage)
+            {
+                item.UsageBreakdown.Add(new UsageLimitInfo
+                {
+                    Title = product.DisplayName,
+                    UsedAmount = Math.Clamp(product.UsedPercent, 0.0, 100.0),
+                    LimitDescription = "週次使用量の内訳"
+                });
             }
 
             LogOutputReceived?.Invoke($"[Grok] 反映完了: {item.PrimaryLimit.Title} {_lastGrokData.UsedPercent:F0}%使用済み (残{_lastGrokData.RemainingPercent:F0}%), リセット: {_lastGrokData.ResetTimeText}");
@@ -689,6 +697,7 @@ public class UsageFetcherService
             item.SecondaryLimit = null;
             item.AllLimits.Clear();
             item.AllLimits.Add(item.PrimaryLimit);
+            item.UsageBreakdown.Clear();
         }
     }
 

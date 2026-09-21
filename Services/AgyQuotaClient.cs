@@ -93,6 +93,9 @@ public class AgyQuotaClient
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8
             };
+            // 利用状況の定期取得からCLI本体のバックグラウンド更新を派生させない。
+            // この子プロセスだけに適用し、手動起動や明示的な `agy update` は従来どおり有効にする。
+            psi.Environment["AGY_CLI_DISABLE_AUTO_UPDATE"] = "true";
 
             using var process = new Process { StartInfo = psi };
             process.Start();

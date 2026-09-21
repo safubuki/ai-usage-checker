@@ -13,6 +13,7 @@ public class AiUsageItem : ViewModelBase
     private UsageLimitInfo _primaryLimit = new();
     private UsageLimitInfo? _secondaryLimit;
     private ObservableCollection<UsageLimitInfo> _allLimits = new();
+    private readonly ObservableCollection<UsageLimitInfo> _usageBreakdown = new();
     private int _displayOrder;
     private bool _isSelected;
     private DateTime _lastRefreshed = DateTime.Now;
@@ -23,6 +24,11 @@ public class AiUsageItem : ViewModelBase
     private bool _isRecoveredGlowActive;
     private double? _prevPrimaryPercent;
     private double? _prevSecondaryPercent;
+
+    public AiUsageItem()
+    {
+        _usageBreakdown.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasUsageBreakdown));
+    }
 
     public bool IsDataLoaded
     {
@@ -173,6 +179,13 @@ public class AiUsageItem : ViewModelBase
         get => _allLimits;
         set => SetProperty(ref _allLimits, value);
     }
+
+    /// <summary>
+    /// 主制限を消費した機能別の内訳。独立した利用制限ではないため、AllLimits とは分けて表示する。
+    /// </summary>
+    public ObservableCollection<UsageLimitInfo> UsageBreakdown => _usageBreakdown;
+
+    public bool HasUsageBreakdown => UsageBreakdown.Count > 0;
 
     public int DisplayOrder
     {

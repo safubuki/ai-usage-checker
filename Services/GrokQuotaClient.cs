@@ -21,11 +21,19 @@ public class GrokQuotaData
     public DateTime? PeriodEnd { get; set; }
     public double GrokBuildPercent { get; set; }
     public double GrokChatPercent { get; set; }
+    public List<GrokProductUsage> ProductUsage { get; set; } = new();
     public double PrepaidBalance { get; set; }
     public double OnDemandUsed { get; set; }
     public string ErrorMessage { get; set; } = "";
     public bool IsFromFallback { get; set; }
     public DateTime? SourceTimestamp { get; set; }
+}
+
+public class GrokProductUsage
+{
+    public string Product { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public double UsedPercent { get; set; }
 }
 
 public class GrokQuotaClient
@@ -214,13 +222,26 @@ public class GrokQuotaClient
                 }
             }
 
-            // プロダクト別内訳 (GrokBuild, GrokChat)
+            // プロダクト別内訳。Build / Chat 以外（Imagine など）も API の返却値をそのまま拾う。
             if (configElem.TryGetProperty("productUsage", out var puElem) && puElem.ValueKind == JsonValueKind.Array)
             {
                 foreach (var item in puElem.EnumerateArray())
                 {
                     string product = item.TryGetProperty("product", out var pName) ? (pName.GetString() ?? "") : "";
-                    double usage = item.TryGetProperty("usagePercent", out var uPct) ? uPct.GetDouble() : 0.0;
+                    if (string.IsNullOrWhiteSpace(product) ||
+                        !item.TryGetProperty("usagePercent", out var uPct) ||
+                        !uPct.TryGetDouble(out var usage))
+                    {
+                        continue;
+                    }
+
+                    usage = Math.Clamp(usage, 0.0, 100.0);
+                    result.ProductUsage.Add(new GrokProductUsage
+                    {
+                        Product = product,
+                        DisplayName = GetProductDisplayName(product),
+                        UsedPercent = usage
+                    });
 
                     if (product.Equals("GrokBuild", StringComparison.OrdinalIgnoreCase))
                     {
@@ -243,7 +264,10 @@ public class GrokQuotaClient
                 result.PrepaidBalance = pbVal.GetDouble();
             }
 
-            LogOutputReceived?.Invoke($"[Grok] 取得成功: {result.PlanName} {result.UsedPercent:F0}%使用済 (残{result.RemainingPercent:F0}%), リセット: {result.ResetTimeText}, Build: {result.GrokBuildPercent:F0}%, Chat: {result.GrokChatPercent:F0}%");
+            string breakdown = result.ProductUsage.Count > 0
+                ? string.Join(", ", result.ProductUsage.Select(p => $"{p.DisplayName}: {p.UsedPercent:F0}%"))
+                : "内訳なし";
+            LogOutputReceived?.Invoke($"[Grok] 取得成功: {result.PlanName} {result.UsedPercent:F0}%使用済 (残{result.RemainingPercent:F0}%), リセット: {result.ResetTimeText}, {breakdown}");
             return result;
         }
         catch (Exception ex)
@@ -251,6 +275,32 @@ public class GrokQuotaClient
             LogOutputReceived?.Invoke($"[Grok] JSON解析エラー: {ex.Message}");
             return null;
         }
+    }
+
+    private static string GetProductDisplayName(string product)
+    {
+        return product.ToLowerInvariant() switch
+        {
+            "grokbuild" => "Grok Build",
+            "grokchat" => "チャット",
+            "grokimagine" or "grokimage" or "imagine" or "image" => "Imagine",
+            _ => SplitProductName(product)
+        };
+    }
+
+    private static string SplitProductName(string product)
+    {
+        var chars = new List<char>(product.Length + 4);
+        for (int i = 0; i < product.Length; i++)
+        {
+            char current = product[i];
+            if (i > 0 && char.IsUpper(current) && !char.IsUpper(product[i - 1]) && !char.IsWhiteSpace(product[i - 1]))
+            {
+                chars.Add(' ');
+            }
+            chars.Add(current);
+        }
+        return new string(chars.ToArray());
     }
 
     private async Task<string?> RefreshTokenAsync(string issuer, string clientId, string refreshToken, string authFilePath, string entryKey)
