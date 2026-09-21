@@ -103,6 +103,15 @@ public class MainViewModel : ViewModelBase
         _settingsService.SaveSettings(_settings);
     }
 
+    public void SaveMonitorDeviceName(string deviceName)
+    {
+        if (string.IsNullOrWhiteSpace(deviceName)) return;
+        if (string.Equals(_settings.MonitorDeviceName, deviceName, StringComparison.OrdinalIgnoreCase)) return;
+
+        _settings.MonitorDeviceName = deviceName;
+        _settingsService.SaveSettings(_settings);
+    }
+
     public string StatusText
     {
         get => _statusText;
