@@ -189,16 +189,26 @@ public class GrokQuotaClient
 
             var result = new GrokQuotaData();
 
-            if (configElem.TryGetProperty("creditUsagePercent", out var cupElem) && cupElem.TryGetDouble(out var usedPercent))
+            // 週の切り替わり直後は creditUsagePercent が無く、historyLen が 0 の応答が返る。
+            // その応答は取得成功で、使用量はまだ無い。
+            if (!TryReadUsagePercent(configElem, out var usedPercent))
             {
-                result.UsedPercent = usedPercent;
-                result.RemainingPercent = Math.Max(0.0, 100.0 - result.UsedPercent);
+                bool hasPeriod = configElem.TryGetProperty("currentPeriod", out _)
+                    || configElem.TryGetProperty("billingPeriodEnd", out _);
+                int historyLen = 0;
+                bool hasHistory = configElem.TryGetProperty("historyLen", out var historyElem)
+                    && historyElem.TryGetInt32(out historyLen);
+                if (!hasPeriod || (hasHistory && historyLen > 0))
+                {
+                    LogOutputReceived?.Invoke("[Grok] クォータ応答に利用率情報がありません。取得エラーとして扱います");
+                    return null;
+                }
+
+                usedPercent = 0;
             }
-            else
-            {
-                LogOutputReceived?.Invoke("[Grok] クォータ応答に利用率情報がありません。取得エラーとして扱います");
-                return null;
-            }
+
+            result.UsedPercent = usedPercent;
+            result.RemainingPercent = Math.Max(0.0, 100.0 - result.UsedPercent);
 
             result.IsSuccess = true;
 
@@ -275,6 +285,61 @@ public class GrokQuotaClient
             LogOutputReceived?.Invoke($"[Grok] JSON解析エラー: {ex.Message}");
             return null;
         }
+    }
+
+    private static bool TryReadUsagePercent(JsonElement configElem, out double usedPercent)
+    {
+        usedPercent = 0;
+        if (TryReadDouble(configElem, "creditUsagePercent", out usedPercent))
+        {
+            return true;
+        }
+
+        if (!configElem.TryGetProperty("productUsage", out var products) || products.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        double? maxUsage = null;
+        foreach (var item in products.EnumerateArray())
+        {
+            if (TryReadDouble(item, "usagePercent", out var usage))
+            {
+                maxUsage = Math.Max(maxUsage ?? 0, usage);
+            }
+        }
+
+        if (!maxUsage.HasValue)
+        {
+            return false;
+        }
+
+        usedPercent = maxUsage.Value;
+        return true;
+    }
+
+    private static bool TryReadDouble(JsonElement parent, string name, out double value)
+    {
+        value = 0;
+        if (!parent.TryGetProperty(name, out var elem))
+        {
+            return false;
+        }
+
+        if (elem.ValueKind == JsonValueKind.Number && elem.TryGetDouble(out value))
+        {
+            return true;
+        }
+
+        if (elem.ValueKind == JsonValueKind.String &&
+            double.TryParse(elem.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+        {
+            return true;
+        }
+
+        return elem.ValueKind == JsonValueKind.Object
+            && elem.TryGetProperty("val", out var valElem)
+            && valElem.TryGetDouble(out value);
     }
 
     private static string GetProductDisplayName(string product)
