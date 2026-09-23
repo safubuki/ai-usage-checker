@@ -14,6 +14,35 @@
         <converters:NullToVisibilityConverter x:Key="NullToVisibilityConverter"/>
         <converters:StatusBadgeBrushConverter x:Key="StatusBadgeBrushConverter"/>
         <converters:StatusBadgeTextBrushConverter x:Key="StatusBadgeTextBrushConverter"/>
+        <Style x:Key="CliActionButton" TargetType="Button">
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Opacity" Value="0.82"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Opacity" Value="0.9"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <Border Background="#1A1F1E" 
@@ -207,6 +236,7 @@
                             <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,6,0,0">
                                 <!-- 未インストール時: ワンクリックインストールボタン -->
                                 <Button Content="📥 ワンクリックでインストール" 
+                                        Style="{StaticResource CliActionButton}"
                                         FontSize="9.5" FontWeight="Bold"
                                         Padding="8,3" Margin="0,0,6,0"
                                         Background="#10B981" Foreground="#FFFFFF"
@@ -215,13 +245,7 @@
                                         CommandParameter="{Binding SelectedItem}"
                                         IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
                                         Cursor="Hand"
-                                        Visibility="{Binding SelectedItem.CliInfo.IsInstalled, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=Inverse}">
-                                    <Button.Resources>
-                                        <Style TargetType="Border">
-                                            <Setter Property="CornerRadius" Value="4"/>
-                                        </Style>
-                                    </Button.Resources>
-                                </Button>
+                                        Visibility="{Binding SelectedItem.CliInfo.IsInstalled, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=Inverse}"/>
 
                                 <!-- 未ログイン時 (インストール済み): ログインボタン -->
                                 <Button Content="{Binding SelectedItem.LoginButtonText}" 
@@ -235,7 +259,7 @@
                                         ToolTip="ブラウザまたはコンソールで認証画面を開き、利用枠データを連携します"
                                         Cursor="Hand">
                                     <Button.Style>
-                                        <Style TargetType="Button">
+                                        <Style TargetType="Button" BasedOn="{StaticResource CliActionButton}">
                                             <Setter Property="Visibility" Value="Collapsed"/>
                                             <Style.Triggers>
                                                 <MultiDataTrigger>
@@ -248,15 +272,11 @@
                                             </Style.Triggers>
                                         </Style>
                                     </Button.Style>
-                                    <Button.Resources>
-                                        <Style TargetType="Border">
-                                            <Setter Property="CornerRadius" Value="4"/>
-                                        </Style>
-                                    </Button.Resources>
                                 </Button>
 
                                 <!-- 更新あり時: 最新アップデートボタン -->
                                 <Button Content="🚀 最新バージョンに更新" 
+                                        Style="{StaticResource CliActionButton}"
                                         FontSize="9.5" FontWeight="Bold"
                                         Padding="8,3" Margin="0,0,6,0"
                                         Background="#3B82F6" Foreground="#FFFFFF"
@@ -265,16 +285,11 @@
                                         CommandParameter="{Binding SelectedItem}"
                                         IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
                                         Cursor="Hand"
-                                        Visibility="{Binding SelectedItem.CliInfo.HasUpdate, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <Button.Resources>
-                                        <Style TargetType="Border">
-                                            <Setter Property="CornerRadius" Value="4"/>
-                                        </Style>
-                                    </Button.Resources>
-                                </Button>
+                                        Visibility="{Binding SelectedItem.CliInfo.HasUpdate, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
                                 <!-- 更新確認ボタン -->
                                 <Button Content="🔍 更新を確認" 
+                                        Style="{StaticResource CliActionButton}"
                                         FontSize="9.5"
                                         Padding="8,3" Margin="0,0,6,0"
                                         Background="#262E2B" Foreground="#D1D5DB" 
@@ -282,13 +297,7 @@
                                         Command="{Binding CheckCliCommand}"
                                         CommandParameter="{Binding SelectedItem}"
                                         IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
-                                        Cursor="Hand">
-                                    <Button.Resources>
-                                        <Style TargetType="Border">
-                                            <Setter Property="CornerRadius" Value="4"/>
-                                        </Style>
-                                    </Button.Resources>
-                                </Button>
+                                        Cursor="Hand"/>
                             </StackPanel>
                         </Grid>
                     </Border>
