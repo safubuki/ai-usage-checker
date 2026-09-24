@@ -1,6 +1,6 @@
 @echo off
 echo ===================================================
-echo  AI Usage Checker - Publish Single-File Executable
+echo  Turtle AI Usage Checker - Publish Single-File
 echo ===================================================
 echo.
 echo Building single-file release package...

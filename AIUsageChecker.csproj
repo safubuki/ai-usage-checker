@@ -7,10 +7,20 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
 
+    <ApplicationIcon>assets\app.ico</ApplicationIcon>
+    <AssemblyTitle>Turtle AI Usage Checker</AssemblyTitle>
+    <Product>Turtle AI Usage Checker</Product>
+    <Description>Turtle AI Usage Checker - Desktop widget for monitoring AI service quotas</Description>
+
     <!-- 単一実行ファイル(Single-File)化の設定: Smart App Control による未署名DLL個別読み込みブロックを回避 -->
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="assets\icon-images.png" />
+    <Resource Include="assets\app.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="System.Management" Version="10.0.12" />

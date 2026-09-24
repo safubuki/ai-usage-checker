@@ -28,7 +28,14 @@ public class MainViewModel : ViewModelBase
     private readonly List<LogEntry> _allLogEntries = new();
     private ObservableCollection<string> _consoleLogs = new();
     private bool _isShowAllLogs;
+    private bool _isStartupLoading = true;
     private DateTime _lastCliStatusRefreshUtc = DateTime.MinValue;
+
+    public bool IsStartupLoading
+    {
+        get => _isStartupLoading;
+        set => SetProperty(ref _isStartupLoading, value);
+    }
 
     public ObservableCollection<AiUsageItem> Items
     {
@@ -267,7 +274,7 @@ public class MainViewModel : ViewModelBase
         var serviceType = DetectServiceType(log);
         var entry = new LogEntry(log, serviceType);
 
-        App.Current?.Dispatcher.Invoke(() =>
+        App.Current?.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
         {
             _allLogEntries.Insert(0, entry);
             if (_allLogEntries.Count > 500)
@@ -275,7 +282,8 @@ public class MainViewModel : ViewModelBase
                 _allLogEntries.RemoveAt(_allLogEntries.Count - 1);
             }
 
-            if (ShouldDisplayLog(entry))
+            // 詳細画面が開いているときのみUIコレクションを更新（起動時や通常時のUI負荷を完全排除）
+            if (IsDetailOpen && ShouldDisplayLog(entry))
             {
                 ConsoleLogs.Insert(0, entry.Message);
                 if (ConsoleLogs.Count > 200)
@@ -365,8 +373,24 @@ public class MainViewModel : ViewModelBase
     {
         Items = InitialCatalogFactory.CreateInitialServices(_settings.DisplayOrder);
 
-        // 起動時に非同期でCLI確認とUsage更新
-        _ = RefreshAllAsync(isSilent: false);
+        // 起動時に非同期でCLI確認とUsage更新、完了後にローディング画面をフェードアウト
+        _ = RunStartupFetchAsync();
+    }
+
+    private async Task RunStartupFetchAsync()
+    {
+        try
+        {
+            // 初回描画とアニメーションが最優先で滑らかに開始されるための微小待機 (150ms)
+            await Task.Delay(150);
+            await RefreshAllAsync(isSilent: false);
+        }
+        finally
+        {
+            // インジケーターバーの優雅な余韻と美しいフェードアウトのためのウェイト (800ms)
+            await Task.Delay(800);
+            IsStartupLoading = false;
+        }
     }
 
     public async Task RefreshAllAsync(bool isSilent = false, bool checkCliStatus = true)
@@ -374,7 +398,6 @@ public class MainViewModel : ViewModelBase
         if (IsRefreshing) return;
         IsRefreshing = true;
 
-        // サイレント定期更新の場合はヘッダーの「取得中...」表示も出さず、ユーザーに更新を意識させない
         if (!isSilent)
         {
             StatusText = "利用状況を取得中...";
@@ -382,47 +405,59 @@ public class MainViewModel : ViewModelBase
 
         try
         {
-            // 既存カードのバッジを「確認中...」に戻さない（裏側で取得し、完了時にパッと切り替える）
+            // UIスレッドを一切ブロックしないよう、取得とCLIチェックの全並列処理をバックグラウンドスレッドプールで完全オフロード実行
+            var currentItems = Items.ToList();
 
-            List<Task<(AiUsageItem Item, CliInfo TempCli)>>? cliTasks = null;
-            if (checkCliStatus)
+            var cliResults = await Task.Run(async () =>
             {
-                // CLIの探索・バージョン確認は起動時、手動更新時、および6時間ごとに限定する。
-                // 画面上のCliInfoを直接更新しないため、個別完了時にバッジがバラバラ変わらない。
-                cliTasks = Items.Select(async item =>
+                Task<List<(AiUsageItem Item, CliInfo TempCli)>>? cliWorkerTask = null;
+                if (checkCliStatus)
                 {
-                    var tempCli = new CliInfo
+                    // 各サービスのCLI確認をスレッドプール上で完全並列実行
+                    var tasks = currentItems.Select(item => Task.Run(async () =>
                     {
-                        Name = item.CliInfo.Name,
-                        CommandName = item.CliInfo.CommandName,
-                        PackageName = item.CliInfo.PackageName,
-                        UsageCheckCommand = item.CliInfo.UsageCheckCommand,
-                        IsSubscribed = item.CliInfo.IsSubscribed
-                    };
-                    await _cliManager.CheckCliStatusAsync(tempCli);
-                    return (Item: item, TempCli: tempCli);
-                }).ToList();
-            }
+                        var tempCli = new CliInfo
+                        {
+                            Name = item.CliInfo.Name,
+                            CommandName = item.CliInfo.CommandName,
+                            PackageName = item.CliInfo.PackageName,
+                            UsageCheckCommand = item.CliInfo.UsageCheckCommand,
+                            IsSubscribed = item.CliInfo.IsSubscribed
+                        };
+                        await _cliManager.CheckCliStatusAsync(tempCli);
+                        return (Item: item, TempCli: tempCli);
+                    })).ToList();
 
-            // 利用状況（クォータ）は従来どおり5分ごとに取得する。
-            var usageTask = _usageFetcher.FetchAllRawDataAsync();
+                    cliWorkerTask = Task.WhenAll(tasks).ContinueWith(t => t.Result.ToList());
+                }
 
-            if (cliTasks != null)
+                // 各クォータの生データ取得
+                var usageWorkerTask = _usageFetcher.FetchAllRawDataAsync();
+
+                if (cliWorkerTask != null)
+                {
+                    await Task.WhenAll(usageWorkerTask, cliWorkerTask);
+                    return await cliWorkerTask;
+                }
+                else
+                {
+                    await usageWorkerTask;
+                    return null;
+                }
+            });
+
+            // 取得完了後のUIデータ反映のみUIスレッドで一括実行
+            if (cliResults != null)
             {
-                await Task.WhenAll(usageTask, Task.WhenAll(cliTasks));
-                var cliResults = await Task.WhenAll(cliTasks);
                 foreach (var res in cliResults)
                 {
-                    // CLI状態を先に反映し、その後にプラン・利用枠状態を適用する。
                     res.Item.CliInfo.CopyFrom(res.TempCli);
                     _usageFetcher.ApplyUsage(res.Item);
                 }
-
                 _lastCliStatusRefreshUtc = DateTime.UtcNow;
             }
             else
             {
-                await usageTask;
                 foreach (var item in Items)
                 {
                     _usageFetcher.ApplyUsage(item);

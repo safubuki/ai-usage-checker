@@ -1,10 +1,14 @@
-# ai-usage-checker (AI利用状況チェッカー)
+# 🐢 Turtle AI Usage Checker
+
+<p align="center">
+  <img src="./assets/icon-images.png" alt="Turtle AI Usage Checker Icon" width="120" height="120" />
+</p>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-10B981.svg)](./LICENSE)
 [![.NET 10.0](https://img.shields.io/badge/.NET-10.0-8B5CF6.svg)](https://dotnet.microsoft.com/)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0284C7.svg)]()
 
-デスクトップPC上で各種AIサービス（OpenAI Codex, Claude, Gemini, Grok, GitHub Copilot）の**利用制限・クォータ（5時間制限、週次制限、プレミアム要求など）**をリアルタイムに確認・監視できる、軽量で洗練されたWindowsデスクトップ（WPF / .NET 10）アプリケーションです。
+**Turtle AI Usage Checker** は、デスクトップPC上で各種AIサービス（OpenAI Codex, Claude, Gemini, Grok, GitHub Copilot）の**利用制限・クォータ（5時間制限、週次制限、プレミアム要求、リセット権など）**をリアルタイムに確認・監視できる、軽量で洗練されたWindowsデスクトップ（WPF / .NET 10）常駐ウィジェットです。
 
 サッと起動してデスクトップの隅に常駐でき、各AIのCLIツールや公式エンドポイントから実際の生データを取得してグラフィカルに可視化します。
 
