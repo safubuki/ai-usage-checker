@@ -14,6 +14,9 @@ public class AiUsageItem : ViewModelBase
     private UsageLimitInfo? _secondaryLimit;
     private ObservableCollection<UsageLimitInfo> _allLimits = new();
     private readonly ObservableCollection<UsageLimitInfo> _usageBreakdown = new();
+    private readonly ObservableCollection<ResetCreditInfo> _resetCredits = new();
+    private int _resetCreditsAvailableCount;
+    private string _earliestResetCreditExpireText = "";
     private int _displayOrder;
     private bool _isSelected;
     private DateTime _lastRefreshed = DateTime.Now;
@@ -28,6 +31,11 @@ public class AiUsageItem : ViewModelBase
     public AiUsageItem()
     {
         _usageBreakdown.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasUsageBreakdown));
+        _resetCredits.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasResetCredits));
+            OnPropertyChanged(nameof(ResetCreditsBadgeText));
+        };
     }
 
     public bool IsDataLoaded
@@ -186,6 +194,41 @@ public class AiUsageItem : ViewModelBase
     public ObservableCollection<UsageLimitInfo> UsageBreakdown => _usageBreakdown;
 
     public bool HasUsageBreakdown => UsageBreakdown.Count > 0;
+
+    /// <summary>
+    /// リセット権（リセットチケット）一覧
+    /// </summary>
+    public ObservableCollection<ResetCreditInfo> ResetCredits => _resetCredits;
+
+    public int ResetCreditsAvailableCount
+    {
+        get => _resetCreditsAvailableCount;
+        set
+        {
+            if (SetProperty(ref _resetCreditsAvailableCount, value))
+            {
+                OnPropertyChanged(nameof(HasResetCredits));
+                OnPropertyChanged(nameof(ResetCreditsBadgeText));
+            }
+        }
+    }
+
+    public bool HasResetCredits => ResetCreditsAvailableCount > 0 || ResetCredits.Count > 0;
+
+    public string ResetCreditsBadgeText => ResetCreditsAvailableCount > 0 
+        ? $"{ResetCreditsAvailableCount}件 保有" 
+        : "0件";
+
+    public string EarliestResetCreditExpireText
+    {
+        get => _earliestResetCreditExpireText;
+        set => SetProperty(ref _earliestResetCreditExpireText, value);
+    }
+
+    /// <summary>
+    /// リセット権（リセットチケット）機能をサポートしているプロバイダかどうか (GPT/Codex等)
+    /// </summary>
+    public bool SupportsResetCredits => ServiceType == AiServiceType.GPT;
 
     public int DisplayOrder
     {

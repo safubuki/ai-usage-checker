@@ -12,6 +12,7 @@
         <converters:StatusBadgeBrushConverter x:Key="StatusBadgeBrushConverter"/>
         <converters:StatusBadgeTextBrushConverter x:Key="StatusBadgeTextBrushConverter"/>
         <converters:NullToVisibilityConverter x:Key="NullToVisibilityConverter"/>
+        <converters:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
     </UserControl.Resources>
 
     <Grid Cursor="Hand">
@@ -221,13 +222,40 @@
                             CommandParameter="{Binding}"
                             ToolTip="左に移動"/>
 
+                    <!-- リセット権がない場合: 通常の 詳細表示 ↗ -->
                     <TextBlock Grid.Column="1" 
                                Text="詳細表示 ↗" 
                                FontSize="9" 
                                Foreground="#10B981" 
                                HorizontalAlignment="Center" 
                                VerticalAlignment="Center" 
-                               Opacity="0.8"/>
+                               Opacity="0.8"
+                               Visibility="{Binding HasResetCredits, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=Inverse}"/>
+
+                    <!-- リセット権がある場合: [🎟️ 3件] ピルバッジ + 詳細 ↗ -->
+                    <StackPanel Grid.Column="1" 
+                                Orientation="Horizontal" 
+                                HorizontalAlignment="Center" 
+                                VerticalAlignment="Center"
+                                Visibility="{Binding HasResetCredits, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Border Background="#064E3B" 
+                                BorderBrush="#059669" 
+                                BorderThickness="0.8" 
+                                CornerRadius="3" 
+                                Padding="4,0.5" 
+                                Margin="0,0,4,0"
+                                ToolTip="{Binding EarliestResetCreditExpireText}">
+                            <TextBlock Text="{Binding ResetCreditsAvailableCount, StringFormat='🎟️ {0}件'}" 
+                                       FontSize="8.5" 
+                                       FontWeight="Bold" 
+                                       Foreground="#6EE7B7"/>
+                        </Border>
+                        <TextBlock Text="詳細 ↗" 
+                                   FontSize="9" 
+                                   Foreground="#10B981" 
+                                   VerticalAlignment="Center" 
+                                   Opacity="0.85"/>
+                    </StackPanel>
 
                     <Button Grid.Column="2" 
                             Content="▶" 

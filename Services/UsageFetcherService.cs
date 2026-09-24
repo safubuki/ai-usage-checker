@@ -386,6 +386,28 @@ public class UsageFetcherService
                     ResetTimeText = _lastCodexData.ReserveResetText
                 });
             }
+
+            // リセット権（リセットチケット）の反映
+            item.ResetCreditsAvailableCount = _lastCodexData.ResetCreditsAvailableCount;
+            item.ResetCredits.Clear();
+            foreach (var credit in _lastCodexData.ResetCredits)
+            {
+                item.ResetCredits.Add(credit);
+            }
+
+            if (item.ResetCredits.Count > 0 && item.ResetCredits[0].ExpiresAt.HasValue)
+            {
+                var first = item.ResetCredits[0];
+                item.EarliestResetCreditExpireText = $"最短失効: {first.FormattedExpiresAt} ({first.RemainingTimeText})";
+            }
+            else if (item.ResetCreditsAvailableCount > 0)
+            {
+                item.EarliestResetCreditExpireText = $"{item.ResetCreditsAvailableCount}件 保有";
+            }
+            else
+            {
+                item.EarliestResetCreditExpireText = "保有なし (0件)";
+            }
         }
         else
         {
@@ -408,6 +430,10 @@ public class UsageFetcherService
             item.SecondaryLimit.RemainingPercent = 0.0;
             item.SecondaryLimit.CustomDisplayPercentText = "--";
             item.SecondaryLimit.ResetTimeText = item.CliInfo.IsLoggedIn ? "取得待機" : "要ログイン";
+
+            item.ResetCreditsAvailableCount = 0;
+            item.ResetCredits.Clear();
+            item.EarliestResetCreditExpireText = "";
 
             item.AllLimits.Clear();
             item.AllLimits.Add(item.PrimaryLimit);

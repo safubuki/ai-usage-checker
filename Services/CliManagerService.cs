@@ -18,6 +18,7 @@ public class CliManagerService
 
     private readonly string _userProfile;
     private readonly string _npmGlobalPath;
+    private readonly string _localBinPath;
     private readonly string _grokBinPath;
     private readonly string _agyBinPath;
     private readonly string _geminiBinPath;
@@ -27,6 +28,7 @@ public class CliManagerService
     {
         _userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         _npmGlobalPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "npm");
+        _localBinPath = Path.Combine(_userProfile, ".local", "bin");
         _grokBinPath = Path.Combine(_userProfile, ".grok", "bin");
         _agyBinPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "agy", "bin");
         _geminiBinPath = Path.Combine(_userProfile, ".gemini", "bin");
@@ -433,6 +435,8 @@ public class CliManagerService
             Path.Combine(_npmGlobalPath, $"{commandName}.cmd"),
             Path.Combine(_npmGlobalPath, $"{commandName}.ps1"),
             Path.Combine(_npmGlobalPath, $"{commandName}"),
+            Path.Combine(_localBinPath, $"{commandName}.exe"),
+            Path.Combine(_localBinPath, $"{commandName}"),
             Path.Combine(_grokBinPath, $"{commandName}.exe"),
             Path.Combine(_grokBinPath, $"{commandName}")
         };

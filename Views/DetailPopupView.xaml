@@ -194,6 +194,110 @@
                                     </ItemsControl>
                                 </StackPanel>
                             </Border>
+
+                            <!-- Codex / GPT リセット権（リセットチケット）セクション -->
+                            <Border Background="#0C1412"
+                                    BorderBrush="#1B382B"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
+                                    Padding="8,6"
+                                    Margin="0,5,0,2"
+                                    Visibility="{Binding SelectedItem.SupportsResetCredits, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <StackPanel>
+                                    <!-- ヘッダー行: 🎟️ アイコン + タイトル + 保有バッジ + 最短Expire表示 -->
+                                    <Grid Margin="0,0,0,3">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="🎟️" FontSize="11" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                                            <TextBlock Text="リセット権 (チケット)" FontSize="9.5" FontWeight="Bold" Foreground="#10B981" VerticalAlignment="Center"/>
+                                            
+                                            <!-- 保有バッジ -->
+                                            <Border CornerRadius="3" Padding="5,1" Margin="6,0,0,0" VerticalAlignment="Center">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="#064E3B"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding SelectedItem.HasResetCredits}" Value="False">
+                                                                <Setter Property="Background" Value="#27272A"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <TextBlock Text="{Binding SelectedItem.ResetCreditsBadgeText}" 
+                                                           FontSize="8.5" FontWeight="Bold">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="#6EE7B7"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding SelectedItem.HasResetCredits}" Value="False">
+                                                                    <Setter Property="Foreground" Value="#9CA3AF"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Border>
+                                        </StackPanel>
+
+                                        <!-- 最短Expire表示 -->
+                                        <TextBlock Text="{Binding SelectedItem.EarliestResetCreditExpireText}" 
+                                                   FontSize="8.5" Foreground="#9CA3AF" 
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+
+                                    <!-- リセットチケット一覧 (保有時) -->
+                                    <ItemsControl ItemsSource="{Binding SelectedItem.ResetCredits}"
+                                                  Visibility="{Binding SelectedItem.HasResetCredits, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="#14211C" BorderBrush="#1C2E27" BorderThickness="1" CornerRadius="4" Padding="6,3" Margin="0,1.5">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        
+                                                        <!-- チケット種別/タイトル -->
+                                                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
+                                                            <TextBlock Text="•" FontSize="10" Foreground="#10B981" Margin="0,0,4,0" FontWeight="Bold"/>
+                                                            <TextBlock Text="{Binding Title}" 
+                                                                       FontSize="9.5" FontWeight="SemiBold" Foreground="#E5E7EB" 
+                                                                       TextTrimming="CharacterEllipsis" 
+                                                                       ToolTip="{Binding Description}"/>
+                                                        </StackPanel>
+
+                                                        <!-- Expire日時 + 残り時間ピルバッジ -->
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding FormattedExpiresAt, StringFormat='{}{0} Expire'}" 
+                                                                       FontSize="9" Foreground="#9CA3AF" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                            <Border Background="#1C2D25" CornerRadius="3" Padding="4,1" VerticalAlignment="Center">
+                                                                <TextBlock Text="{Binding RemainingTimeText}" 
+                                                                           FontSize="8.5" FontWeight="SemiBold">
+                                                                    <TextBlock.Style>
+                                                                        <Style TargetType="TextBlock">
+                                                                            <Setter Property="Foreground" Value="#34D399"/>
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsUrgent}" Value="True">
+                                                                                    <Setter Property="Foreground" Value="#FBBF24"/>
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </TextBlock.Style>
+                                                                </TextBlock>
+                                                            </Border>
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <!-- 保有なし時の控えめな案内 (HasResetCreditsがFalseの時) -->
+                                    <Border Background="#141817" CornerRadius="4" Padding="6,3" Margin="0,1.5"
+                                            Visibility="{Binding SelectedItem.HasResetCredits, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=Inverse}">
+                                        <TextBlock Text="現在利用可能なリセットチケットはありません" FontSize="9" Foreground="#6B7280" HorizontalAlignment="Center"/>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </Border>
 

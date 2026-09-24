@@ -46,6 +46,7 @@
 | ![GPT詳細](./docs/images/app_detail_gpt.png) | ![Copilot詳細](./docs/images/app_detail_copilot.png) |
 
 - **利用制限の詳細内訳**: 予備週次枠 (`gpt-reserve`) や、プレミアム要求の使用回数（例: `2% 使用済み (残 294 / 300)`）まで正確に表示
+- **🎟️ リセット権・チケットの可視化 (GPT/Codex)**: Codexバックエンドから保有リセットチケット（何件保有、各チケットの有効期限・Expire日時・残り日数）を取得し、限られたスペース内に洗練されたデザインでコンパクトに表示（メインカードにも `🎟️{件数}` バッジ対応）
 - **CLIツールの状態管理**: インストール状況、最新バージョン、更新通知（ワンクリック更新/インストール・ワンクリック認証ログイン対応）
 - **ワンクリック認証ログイン（全AI対応）**: 未ログイン時は「要ログイン」バッジが表示され、詳細画面からワンクリックでブラウザ認証（`codex login`, `claude login`, `grok auth login`, `gh auth login` 等）を起動可能
 - **リアルタイムCLI実行ログ**: バックグラウンドでのAPI取得・CLI同期のログをターミナル風コンソールで可視化
@@ -92,7 +93,7 @@
 
 | サービス名 | 対象CLI / プロバイダ | 制限体系 | 取得方式 |
 |---|---|---|---|
-| **GPT** | OpenAI Codex (`codex`) | プラン動的判定<br>・Plus等: 5時間制限 + 週次制限 + 予備枠<br>・Pro等: 週次制限のみ（自動判定） | Codex認証トークン経由 生API直接取得 |
+| **GPT** | OpenAI Codex (`codex`) | プラン動的判定<br>・Plus等: 5時間制限 + 週次制限 + 予備枠<br>・Pro等: 週次制限のみ（自動判定）<br>・リセット権（チケット保有数 & 有効期限） | Codex認証トークン経由 生API直接取得 (`/wham/rate-limit-reset-credits`) |
 | **Claude** | Anthropic (`claude`) | 契約時: 5時間制限 + 週次制限<br>未契約時: 契約ステータス | `~/.claude.json` / Claude CLI 連携 |
 | **Gemini** | Google DeepMind (Antigravity CLI: `agy`) | 5時間制限 + 週次制限（外部モデル枠対応） | Antigravity CLI (`agy -p "/usage"`) 直接取得 |
 | **Grok** | xAI (`grok`) | 週次制限 (SuperGrok) | Grok CLI / 利用状況判定 |

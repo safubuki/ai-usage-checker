@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
+using AIUsageChecker.Models;
 
 namespace AIUsageChecker.Services;
 
@@ -19,6 +21,8 @@ public class CodexQuotaData
     public string WeeklyResetText { get; set; } = "";
     public double ReserveRemainingPercent { get; set; }
     public string ReserveResetText { get; set; } = "";
+    public int ResetCreditsAvailableCount { get; set; }
+    public List<ResetCreditInfo> ResetCredits { get; set; } = new();
     public string ErrorMessage { get; set; } = "";
 }
 
@@ -193,6 +197,15 @@ public class CodexQuotaClient
                 }
             }
 
+            // rate_limit_reset_credits (usage エンドポイントからの件数取得)
+            if (root.TryGetProperty("rate_limit_reset_credits", out var rcElem))
+            {
+                if (rcElem.TryGetProperty("available_count", out var acElem))
+                {
+                    result.ResetCreditsAvailableCount = acElem.GetInt32();
+                }
+            }
+
             if (!result.HasFiveHourLimit && !result.HasWeeklyLimit)
             {
                 result.IsSuccess = false;
@@ -201,13 +214,26 @@ public class CodexQuotaClient
                 return result;
             }
 
+            // 詳細なリセット権（リセットチケット）情報（件数・Expire日時・タイトル）を取得
+            await FetchResetCreditsDetailAsync(accessToken, accountId, result);
+
             string limitSummary = result.HasFiveHourLimit && result.HasWeeklyLimit 
                 ? $"5h枠={result.FiveHourRemainingPercent:F0}% ({result.FiveHourResetText}), 週次枠={result.WeeklyRemainingPercent:F0}% ({result.WeeklyResetText})"
                 : result.HasWeeklyLimit 
                     ? $"週次枠のみ={result.WeeklyRemainingPercent:F0}% ({result.WeeklyResetText})"
                     : $"5h枠のみ={result.FiveHourRemainingPercent:F0}% ({result.FiveHourResetText})";
 
-            LogOutputReceived?.Invoke($"[Codex] 取得完了: プラン={result.PlanType.ToUpper()}, {limitSummary}, 予備枠={result.ReserveRemainingPercent:F0}%");
+            if (result.ResetCreditsAvailableCount > 0)
+            {
+                string expireSummary = result.ResetCredits.Count > 0 && result.ResetCredits[0].ExpiresAt.HasValue
+                    ? $", リセット権={result.ResetCreditsAvailableCount}件 (最短Expire={result.ResetCredits[0].FormattedExpiresAt})"
+                    : $", リセット権={result.ResetCreditsAvailableCount}件";
+                LogOutputReceived?.Invoke($"[Codex] 取得完了: プラン={result.PlanType.ToUpper()}, {limitSummary}, 予備枠={result.ReserveRemainingPercent:F0}%{expireSummary}");
+            }
+            else
+            {
+                LogOutputReceived?.Invoke($"[Codex] 取得完了: プラン={result.PlanType.ToUpper()}, {limitSummary}, 予備枠={result.ReserveRemainingPercent:F0}%");
+            }
 
             return result;
         }
@@ -215,6 +241,97 @@ public class CodexQuotaClient
         {
             LogOutputReceived?.Invoke($"[Codex] 取得例外: {ex.Message}");
             return null;
+        }
+    }
+
+    private async Task FetchResetCreditsDetailAsync(string accessToken, string? accountId, CodexQuotaData result)
+    {
+        try
+        {
+            LogOutputReceived?.Invoke("[Codex] リセット権(チケット)情報取得中...");
+
+            using var resetRequest = new HttpRequestMessage(HttpMethod.Get, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits");
+            resetRequest.Headers.Add("Authorization", $"Bearer {accessToken}");
+            resetRequest.Headers.Add("User-Agent", "codex/0.153.4");
+            resetRequest.Headers.Add("Accept", "application/json");
+
+            if (!string.IsNullOrEmpty(accountId))
+            {
+                resetRequest.Headers.Add("ChatGPT-Account-ID", accountId);
+            }
+
+            var resetResponse = await HttpClient.SendAsync(resetRequest);
+            if (!resetResponse.IsSuccessStatusCode)
+            {
+                LogOutputReceived?.Invoke($"[Codex] リセット権API応答: {(int)resetResponse.StatusCode} (スキップ)");
+                return;
+            }
+
+            var resetJson = await resetResponse.Content.ReadAsStringAsync();
+            using var resetDoc = JsonDocument.Parse(resetJson);
+            var resetRoot = resetDoc.RootElement;
+
+            if (resetRoot.TryGetProperty("available_count", out var ac))
+            {
+                result.ResetCreditsAvailableCount = ac.GetInt32();
+            }
+
+            if (resetRoot.TryGetProperty("credits", out var creditsArray) && creditsArray.ValueKind == JsonValueKind.Array)
+            {
+                var list = new List<ResetCreditInfo>();
+                foreach (var cElem in creditsArray.EnumerateArray())
+                {
+                    string status = cElem.TryGetProperty("status", out var st) ? st.GetString() ?? "" : "";
+                    // 利用可能 (available) なリセット権を抽出
+                    if (!string.IsNullOrEmpty(status) && status != "available")
+                    {
+                        continue;
+                    }
+
+                    string id = cElem.TryGetProperty("id", out var idElem) ? idElem.GetString() ?? "" : "";
+                    string resetType = cElem.TryGetProperty("reset_type", out var rtElem) ? rtElem.GetString() ?? "" : "";
+                    string title = cElem.TryGetProperty("title", out var tElem) ? tElem.GetString() ?? "利用枠リセット権" : "利用枠リセット権";
+                    string desc = cElem.TryGetProperty("description", out var dElem) ? dElem.GetString() ?? "" : "";
+
+                    DateTime? grantedAt = null;
+                    if (cElem.TryGetProperty("granted_at", out var gElem) && DateTime.TryParse(gElem.GetString(), out var gDt))
+                    {
+                        grantedAt = gDt;
+                    }
+
+                    DateTime? expiresAt = null;
+                    if (cElem.TryGetProperty("expires_at", out var exElem) && DateTime.TryParse(exElem.GetString(), out var exDt))
+                    {
+                        expiresAt = exDt;
+                    }
+
+                    list.Add(new ResetCreditInfo
+                    {
+                        Id = id,
+                        ResetType = resetType,
+                        Status = string.IsNullOrEmpty(status) ? "available" : status,
+                        Title = title,
+                        Description = desc,
+                        GrantedAt = grantedAt,
+                        ExpiresAt = expiresAt
+                    });
+                }
+
+                // 失効日時（ExpiresAt）が早い順（昇順）にソートして、直近の期限を先頭に表示
+                list.Sort((a, b) =>
+                {
+                    if (!a.ExpiresAt.HasValue && !b.ExpiresAt.HasValue) return 0;
+                    if (!a.ExpiresAt.HasValue) return 1;
+                    if (!b.ExpiresAt.HasValue) return -1;
+                    return a.ExpiresAt.Value.CompareTo(b.ExpiresAt.Value);
+                });
+
+                result.ResetCredits = list;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogOutputReceived?.Invoke($"[Codex] リセット権詳細解析スキップ: {ex.Message}");
         }
     }
 }
