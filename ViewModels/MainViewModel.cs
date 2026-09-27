@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Threading;
 using AIUsageChecker.Models;
@@ -26,8 +27,9 @@ public class MainViewModel : ViewModelBase
     private bool _isRefreshing;
     private string _statusText = "準備完了";
     private readonly List<LogEntry> _allLogEntries = new();
-    private ObservableCollection<string> _consoleLogs = new();
+    private ObservableCollection<LogEntry> _consoleLogs = new();
     private bool _isShowAllLogs;
+    private int _visibleErrorCount;
     private bool _isStartupLoading = true;
     private DateTime _lastCliStatusRefreshUtc = DateTime.MinValue;
 
@@ -125,10 +127,16 @@ public class MainViewModel : ViewModelBase
         set => SetProperty(ref _statusText, value);
     }
 
-    public ObservableCollection<string> ConsoleLogs
+    public ObservableCollection<LogEntry> ConsoleLogs
     {
         get => _consoleLogs;
         set => SetProperty(ref _consoleLogs, value);
+    }
+
+    public int VisibleErrorCount
+    {
+        get => _visibleErrorCount;
+        private set => SetProperty(ref _visibleErrorCount, value);
     }
 
     // コマンド
@@ -277,19 +285,29 @@ public class MainViewModel : ViewModelBase
         App.Current?.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
         {
             _allLogEntries.Insert(0, entry);
+            LogEntry? expiredEntry = null;
             if (_allLogEntries.Count > 500)
             {
+                expiredEntry = _allLogEntries[^1];
                 _allLogEntries.RemoveAt(_allLogEntries.Count - 1);
             }
 
             // 詳細画面が開いているときのみUIコレクションを更新（起動時や通常時のUI負荷を完全排除）
-            if (IsDetailOpen && ShouldDisplayLog(entry))
+            if (IsDetailOpen)
             {
-                ConsoleLogs.Insert(0, entry.Message);
-                if (ConsoleLogs.Count > 200)
+                if (expiredEntry != null)
                 {
-                    ConsoleLogs.RemoveAt(ConsoleLogs.Count - 1);
+                    ConsoleLogs.Remove(expiredEntry);
                 }
+                if (ShouldDisplayLog(entry))
+                {
+                    ConsoleLogs.Insert(0, entry);
+                    if (ConsoleLogs.Count > 200)
+                    {
+                        ConsoleLogs.RemoveAt(ConsoleLogs.Count - 1);
+                    }
+                }
+                VisibleErrorCount = ConsoleLogs.Count(x => x.IsError);
             }
         });
     }
@@ -321,8 +339,10 @@ public class MainViewModel : ViewModelBase
 
             foreach (var entry in matching)
             {
-                ConsoleLogs.Add(entry.Message);
+                ConsoleLogs.Add(entry);
             }
+
+            VisibleErrorCount = ConsoleLogs.Count(x => x.IsError);
         });
     }
 
@@ -337,33 +357,29 @@ public class MainViewModel : ViewModelBase
     {
         if (string.IsNullOrWhiteSpace(log)) return null;
 
-        if (log.Contains("[Antigravity", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("Antigravity", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("agy", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("[Gemini", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("Gemini", StringComparison.OrdinalIgnoreCase))
+        // 本文中のモデル名（エラー文やパスなど）ではなく、先頭の発信元タグだけを見る。
+        var taggedLog = Regex.Replace(log.TrimStart(), @"^\[\d{2}:\d{2}:\d{2}\]\s*", "");
+        if (!taggedLog.StartsWith('[')) return null;
+        var tagEnd = taggedLog.IndexOf(']');
+        if (tagEnd < 0) return null;
+        var tag = taggedLog[1..tagEnd];
+
+        if (tag.StartsWith("Antigravity", StringComparison.OrdinalIgnoreCase) ||
+            tag.StartsWith("Gemini", StringComparison.OrdinalIgnoreCase) ||
+            tag.Equals("agy", StringComparison.OrdinalIgnoreCase))
             return AiServiceType.Gemini;
 
-        if (log.Contains("[Codex", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("[GPT", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("codex", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("chatgpt", StringComparison.OrdinalIgnoreCase))
+        if (tag.StartsWith("Codex", StringComparison.OrdinalIgnoreCase) ||
+            tag.StartsWith("GPT", StringComparison.OrdinalIgnoreCase))
             return AiServiceType.GPT;
 
-        if (log.Contains("[Claude", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("Claude", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("Anthropic", StringComparison.OrdinalIgnoreCase))
+        if (tag.StartsWith("Claude", StringComparison.OrdinalIgnoreCase))
             return AiServiceType.Claude;
 
-        if (log.Contains("[Grok", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("Grok", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("xai", StringComparison.OrdinalIgnoreCase))
+        if (tag.StartsWith("Grok", StringComparison.OrdinalIgnoreCase))
             return AiServiceType.Grok;
 
-        if (log.Contains("[Copilot", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("Copilot", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("gh api", StringComparison.OrdinalIgnoreCase) ||
-            log.Contains("gh auth", StringComparison.OrdinalIgnoreCase))
+        if (tag.StartsWith("Copilot", StringComparison.OrdinalIgnoreCase))
             return AiServiceType.Copilot;
 
         return null;
@@ -521,10 +537,30 @@ public class LogEntry
 {
     public string Message { get; }
     public AiServiceType? ServiceType { get; }
+    public bool IsError { get; }
+
+    private static readonly string[] ProblemTerms =
+    {
+        "エラー", "失敗", "例外", "タイムアウト", "警告", "見つかりません", "未検出",
+        "未ログイン", "未インストール", "未認証", "未登録", "未契約", "要ログイン",
+        "できません", "取得できなかった", "標準出力が空", "詳細解析スキップ", "再試行",
+        "API応答: 4", "API応答: 5"
+    };
+
+    private static readonly Regex EnglishProblemPattern = new(
+        @"\b(?:error|failed|failure|exception|timeout|timed out|warn(?:ing)?|not found|not installed|no such file|unauthorized|forbidden|denied|invalid|missing|unable to|could not|cannot|can't)\b|npm ERR!",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static readonly Regex StandardErrorTagPattern = new(
+        @"^(?:\[\d{2}:\d{2}:\d{2}\]\s*)?\[[^\]]*\bstderr\]",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public LogEntry(string message, AiServiceType? serviceType)
     {
         Message = message;
         ServiceType = serviceType;
+        IsError = ProblemTerms.Any(term => message.Contains(term, StringComparison.OrdinalIgnoreCase)) ||
+                  EnglishProblemPattern.IsMatch(message) ||
+                  StandardErrorTagPattern.IsMatch(message);
     }
 }

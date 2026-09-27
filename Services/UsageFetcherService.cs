@@ -239,7 +239,22 @@ public class UsageFetcherService
 
         if (hasUsageError)
         {
-            ApplyUsageError(item);
+            if (item.ServiceType == AiServiceType.GPT && _lastCodexData?.IsSuccess == true)
+            {
+                // 一時的な通信失敗では、直近の正常値を消さず取得時刻を明示する。
+                ApplyGptQuota(item);
+                var lastSuccessText = _codexLastSuccessAt?.ToString("MM/dd HH:mm") ?? "時刻不明";
+                item.CliInfo.StatusMessage = $"取得失敗。前回取得 ({lastSuccessText}) の利用枠を表示中";
+                item.PrimaryLimit.ResetTimeText = $"前回 {lastSuccessText} / {item.PrimaryLimit.ResetTimeText}";
+                if (item.SecondaryLimit != null)
+                {
+                    item.SecondaryLimit.ResetTimeText = $"前回 {lastSuccessText} / {item.SecondaryLimit.ResetTimeText}";
+                }
+            }
+            else
+            {
+                ApplyUsageError(item);
+            }
         }
         else
         {

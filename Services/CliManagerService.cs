@@ -299,7 +299,7 @@ public class CliManagerService
         catch (Exception ex)
         {
             cli.StatusMessage = $"ログイン起動失敗: {ex.Message}";
-            Log($"[エラー] {cli.Name} のログイン起動中にエラー: {ex.Message}");
+            Log($"[{cli.Name}] ログイン起動中にエラー: {ex.Message}");
             return false;
         }
         finally

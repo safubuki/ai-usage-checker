@@ -8,7 +8,6 @@ public class AiUsageItem : ViewModelBase
     private AiServiceType _serviceType;
     private string _displayName = "";
     private string _subTitle = "";
-    private string _iconGlyph = "";
     private CliInfo _cliInfo = new();
     private UsageLimitInfo _primaryLimit = new();
     private UsageLimitInfo? _secondaryLimit;
@@ -158,12 +157,6 @@ public class AiUsageItem : ViewModelBase
         set => SetProperty(ref _subTitle, value);
     }
 
-    public string IconGlyph
-    {
-        get => _iconGlyph;
-        set => SetProperty(ref _iconGlyph, value);
-    }
-
     public CliInfo CliInfo
     {
         get => _cliInfo;
@@ -252,11 +245,11 @@ public class AiUsageItem : ViewModelBase
     {
         get => ServiceType switch
         {
-            AiServiceType.GPT => "#10A37F",       // OpenAI Emerald
-            AiServiceType.Claude => "#D97706",    // Claude Amber/Orange
-            AiServiceType.Gemini => "#3B82F6",    // Antigravity Blue/Indigo
-            AiServiceType.Grok => "#EC4899",      // Grok Pink/Neon
-            AiServiceType.Copilot => "#8B5CF6",   // GitHub Copilot Purple
+            AiServiceType.GPT => "#10A37F",
+            AiServiceType.Claude => "#DE8B59",
+            AiServiceType.Gemini => "#74AFFF",
+            AiServiceType.Grok => "#F3F4F6",
+            AiServiceType.Copilot => "#D5D9DF",
             _ => "#22C55E"
         };
     }

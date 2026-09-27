@@ -2,8 +2,87 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:AIUsageChecker"
+             xmlns:models="clr-namespace:AIUsageChecker.Models"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
+        <!-- 各サービスの印象を色と抽象図形で表したオリジナルアイコン。公式ロゴは使用しない。 -->
+        <DataTemplate x:Key="ServiceLogoTemplate">
+            <Viewbox Stretch="Uniform">
+                <Grid Width="24" Height="24" SnapsToDevicePixels="True">
+                    <!-- GPT/Codex: 円形フレームと6弁スパイラルノット（完全一致を避けつつOpenAIの雰囲気を表現） -->
+                    <Canvas x:Name="GptLogo" Visibility="Collapsed">
+                        <Ellipse Canvas.Left="1.5" Canvas.Top="1.5" Width="21" Height="21"
+                                 Stroke="{Binding ThemeAccentColor}" StrokeThickness="1.5"/>
+                        <Path Data="M12.00,9.90 L14.90,9.90 A2.85,2.85 0 0,1 17.90,13.20 L15.10,16.60 M13.82,10.95 L15.27,13.46 A2.85,2.85 0 0,1 13.91,17.71 L9.57,16.98 M13.82,13.05 L12.37,15.56 A2.85,2.85 0 0,1 8.01,16.51 L6.47,12.38 M12.00,14.10 L9.10,14.10 A2.85,2.85 0 0,1 6.10,10.80 L8.90,7.40 M10.18,13.05 L8.73,10.54 A2.85,2.85 0 0,1 10.09,6.29 L14.43,7.02 M10.18,10.95 L11.63,8.44 A2.85,2.85 0 0,1 15.99,7.49 L17.53,11.62"
+                              Stroke="#F3F4F6" StrokeThickness="1.4"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                    </Canvas>
+
+                    <!-- Gemini: 青紫の二つの光点 -->
+                    <Canvas x:Name="GeminiLogo" Visibility="Collapsed">
+                        <Path Data="M10,2 L12,8 L18,10 L12,12 L10,20 L8,12 L2,10 L8,8 Z">
+                            <Path.Fill>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="#65B8FF" Offset="0"/>
+                                    <GradientStop Color="#9B7AE9" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Path.Fill>
+                        </Path>
+                        <Path Data="M19,3 L20,5 L22,6 L20,7 L19,9 L18,7 L16,6 L18,5 Z"
+                              Fill="#A892F5"/>
+                    </Canvas>
+
+                    <!-- Grok: X (xAI) 公式ロゴ (ソリッド線とアウトライン線が交差する𝕏マーク) -->
+                    <Canvas x:Name="GrokLogo" Visibility="Collapsed">
+                        <Path Data="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"
+                              Fill="{Binding ThemeAccentColor}">
+                            <Path.RenderTransform>
+                                <ScaleTransform ScaleX="0.78" ScaleY="0.78" CenterX="12" CenterY="12"/>
+                            </Path.RenderTransform>
+                        </Path>
+                    </Canvas>
+
+                    <!-- Claude: 琥珀色の小さな陽光 -->
+                    <Canvas x:Name="ClaudeLogo" Visibility="Collapsed">
+                        <Path Data="M12,2 V5 M19,5 L17,7 M22,12 H19 M19,19 L17,17 M12,22 V19 M5,19 L7,17 M2,12 H5 M5,5 L7,7"
+                              Stroke="#EAA36B" StrokeThickness="2.2"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                        <Ellipse Canvas.Left="8" Canvas.Top="8" Width="8" Height="8"
+                                 Fill="{Binding ThemeAccentColor}"/>
+                    </Canvas>
+
+                    <!-- Copilot: 黒いバッジに輪郭だけの猫顔。特定のキャラクター形状は使わない。 -->
+                    <Canvas x:Name="CopilotLogo" Visibility="Collapsed">
+                        <Border Canvas.Left="1" Canvas.Top="1" Width="22" Height="22"
+                                CornerRadius="6" Background="#0B0D10" BorderBrush="#545962" BorderThickness="1"/>
+                        <Path Data="M5,11 L5.5,5.5 L9,8 C11,7 13,7 15,8 L18.5,5.5 L19,11 C20,15 17.5,19 12,19 C6.5,19 4,15 5,11 Z"
+                              Fill="#171A1E" Stroke="{Binding ThemeAccentColor}" StrokeThickness="1.3"
+                              StrokeLineJoin="Round"/>
+                        <Ellipse Canvas.Left="8.2" Canvas.Top="12" Width="2.3" Height="2.5" Fill="#B5A5E3"/>
+                        <Ellipse Canvas.Left="13.5" Canvas.Top="12" Width="2.3" Height="2.5" Fill="#B5A5E3"/>
+                        <Ellipse Canvas.Left="11.3" Canvas.Top="15" Width="1.5" Height="1.5" Fill="#D8DDE4"/>
+                    </Canvas>
+                </Grid>
+            </Viewbox>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding ServiceType}" Value="{x:Static models:AiServiceType.GPT}">
+                    <Setter TargetName="GptLogo" Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding ServiceType}" Value="{x:Static models:AiServiceType.Gemini}">
+                    <Setter TargetName="GeminiLogo" Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding ServiceType}" Value="{x:Static models:AiServiceType.Grok}">
+                    <Setter TargetName="GrokLogo" Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding ServiceType}" Value="{x:Static models:AiServiceType.Claude}">
+                    <Setter TargetName="ClaudeLogo" Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding ServiceType}" Value="{x:Static models:AiServiceType.Copilot}">
+                    <Setter TargetName="CopilotLogo" Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
         <!-- カスタムスクロールバー Thumb (つまみ) スタイル -->
         <Style x:Key="ModernScrollBarThumb" TargetType="{x:Type Thumb}">
             <Setter Property="SnapsToDevicePixels" Value="True"/>

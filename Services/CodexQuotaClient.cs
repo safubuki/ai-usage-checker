@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -28,9 +29,15 @@ public class CodexQuotaData
 
 public class CodexQuotaClient
 {
-    private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(5) };
+    private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(12) };
+    private readonly HttpClient _httpClient;
 
     public event Action<string>? LogOutputReceived;
+
+    public CodexQuotaClient(HttpClient? httpClient = null)
+    {
+        _httpClient = httpClient ?? SharedHttpClient;
+    }
 
     public static string GetAuthFilePath()
     {
@@ -62,8 +69,7 @@ public class CodexQuotaClient
 
             LogOutputReceived?.Invoke($"[Codex] 認証情報確認: {authFile}");
 
-            var authJson = await File.ReadAllTextAsync(authFile);
-            using var authDoc = JsonDocument.Parse(authJson);
+            using var authDoc = await ReadAuthDocumentAsync(authFile);
 
             string? accessToken = null;
             string? accountId = null;
@@ -89,17 +95,7 @@ public class CodexQuotaClient
 
             LogOutputReceived?.Invoke("[Codex] GET https://chatgpt.com/backend-api/wham/usage 送信中...");
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, "https://chatgpt.com/backend-api/wham/usage");
-            request.Headers.Add("Authorization", $"Bearer {accessToken}");
-            request.Headers.Add("User-Agent", "codex/0.153.4");
-            request.Headers.Add("Accept", "application/json");
-
-            if (!string.IsNullOrEmpty(accountId))
-            {
-                request.Headers.Add("ChatGPT-Account-ID", accountId);
-            }
-
-            var response = await HttpClient.SendAsync(request);
+            using var response = await SendUsageRequestWithRetryAsync(accessToken, accountId);
             if (!response.IsSuccessStatusCode)
             {
                 LogOutputReceived?.Invoke($"[Codex] HTTP エラー: {(int)response.StatusCode} {response.ReasonPhrase}");
@@ -244,6 +240,74 @@ public class CodexQuotaClient
         }
     }
 
+    private async Task<HttpResponseMessage> SendUsageRequestWithRetryAsync(string accessToken, string? accountId)
+    {
+        const int maxAttempts = 2;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://chatgpt.com/backend-api/wham/usage");
+            request.Headers.Add("Authorization", $"Bearer {accessToken}");
+            request.Headers.Add("User-Agent", "codex/0.153.4");
+            request.Headers.Add("Accept", "application/json");
+
+            if (!string.IsNullOrEmpty(accountId))
+            {
+                request.Headers.Add("ChatGPT-Account-ID", accountId);
+            }
+
+            try
+            {
+                var response = await _httpClient.SendAsync(request);
+                if (attempt == maxAttempts || !IsTransientStatus(response.StatusCode))
+                {
+                    return response;
+                }
+
+                var retryAfter = response.Headers.RetryAfter;
+                var requestedDelay = retryAfter?.Delta ?? (retryAfter?.Date - DateTimeOffset.UtcNow);
+                if (requestedDelay > TimeSpan.FromSeconds(5))
+                {
+                    return response; // 長い待機が指示された場合は次回の定期更新に任せる
+                }
+
+                var delay = requestedDelay.HasValue
+                    ? TimeSpan.FromTicks(Math.Max(0, requestedDelay.Value.Ticks))
+                    : TimeSpan.FromSeconds(1);
+                LogOutputReceived?.Invoke($"[Codex] HTTP {(int)response.StatusCode} のため {delay.TotalSeconds:F0} 秒後に再試行します");
+                response.Dispose();
+                await Task.Delay(delay);
+            }
+            catch (Exception ex) when (attempt < maxAttempts && (ex is HttpRequestException || ex is TaskCanceledException))
+            {
+                LogOutputReceived?.Invoke($"[Codex] 通信が一時的に失敗したため再試行します: {ex.Message}");
+                await Task.Delay(TimeSpan.FromSeconds(1));
+            }
+        }
+
+        throw new InvalidOperationException("Codex の再試行回数を超えました");
+    }
+
+    private static bool IsTransientStatus(HttpStatusCode statusCode) =>
+        statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests || (int)statusCode >= 500;
+
+    private async Task<JsonDocument> ReadAuthDocumentAsync(string authFile)
+    {
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            try
+            {
+                return JsonDocument.Parse(await File.ReadAllTextAsync(authFile));
+            }
+            catch (Exception ex) when (attempt == 1 && (ex is IOException || ex is JsonException))
+            {
+                LogOutputReceived?.Invoke("[Codex] 認証ファイルの読み取りに失敗したため再試行します");
+                await Task.Delay(200);
+            }
+        }
+
+        throw new InvalidOperationException("Codex 認証ファイルの再読み取りに失敗しました");
+    }
+
     private async Task FetchResetCreditsDetailAsync(string accessToken, string? accountId, CodexQuotaData result)
     {
         try
@@ -260,7 +324,8 @@ public class CodexQuotaClient
                 resetRequest.Headers.Add("ChatGPT-Account-ID", accountId);
             }
 
-            var resetResponse = await HttpClient.SendAsync(resetRequest);
+            using var timeout = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var resetResponse = await _httpClient.SendAsync(resetRequest, timeout.Token);
             if (!resetResponse.IsSuccessStatusCode)
             {
                 LogOutputReceived?.Invoke($"[Codex] リセット権API応答: {(int)resetResponse.StatusCode} (スキップ)");

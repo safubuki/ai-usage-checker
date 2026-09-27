@@ -70,7 +70,8 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding SelectedItem.IconGlyph}" FontSize="18" Foreground="{Binding SelectedItem.ThemeAccentColor}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                    <ContentPresenter Content="{Binding SelectedItem}" ContentTemplate="{StaticResource ServiceLogoTemplate}"
+                                      Width="26" Height="26" Margin="0,0,8,0" VerticalAlignment="Center"/>
                     <StackPanel>
                         <TextBlock Text="{Binding SelectedItem.DisplayName}" FontSize="16" FontWeight="Bold" Foreground="#F9FAFB"/>
                         <TextBlock Text="{Binding SelectedItem.SubTitle}" FontSize="10" Foreground="#9CA3AF"/>
@@ -417,6 +418,9 @@
                                 <TextBlock Text="CLI実行ログ" FontSize="9.5" FontWeight="Bold" Foreground="#9CA3AF" VerticalAlignment="Center"/>
 
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding VisibleErrorCount, StringFormat='エラー {0}件'}"
+                                               FontSize="8.5" FontWeight="Bold" Foreground="#F87171"
+                                               VerticalAlignment="Center" Margin="0,0,7,0"/>
                                     <!-- ログフィルター切り替えピルボタン -->
                                     <Border CornerRadius="3" Background="#161E1C" BorderBrush="#263530" BorderThickness="1" Margin="0,0,6,0" Padding="1">
                                         <StackPanel Orientation="Horizontal">
@@ -503,7 +507,18 @@
                                      ScrollViewer.VerticalScrollBarVisibility="Auto">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding}" FontSize="9.5" FontFamily="Consolas, Meiryo" Foreground="#A7F3D0" TextWrapping="Wrap" Margin="0,1.5"/>
+                                        <TextBlock Text="{Binding Message}" FontSize="9.5" FontFamily="Consolas, Meiryo" TextWrapping="Wrap" Margin="0,1.5">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="#A7F3D0"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsError}" Value="True">
+                                                            <Setter Property="Foreground" Value="#F87171"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>

@@ -21,7 +21,6 @@ public static class InitialCatalogFactory
                 ServiceType = AiServiceType.GPT,
                 DisplayName = "GPT/Codex",
                 SubTitle = "OpenAI / Codex",
-                IconGlyph = "⚡",
                 CliInfo = new CliInfo
                 {
                     Name = "Codex",
@@ -54,7 +53,6 @@ public static class InitialCatalogFactory
                 ServiceType = AiServiceType.Claude,
                 DisplayName = "Claude",
                 SubTitle = "Anthropic",
-                IconGlyph = "✦",
                 CliInfo = new CliInfo
                 {
                     Name = "Claude",
@@ -80,7 +78,6 @@ public static class InitialCatalogFactory
                 ServiceType = AiServiceType.Gemini,
                 DisplayName = "Gemini",
                 SubTitle = "Google DeepMind",
-                IconGlyph = "✧",
                 CliInfo = new CliInfo
                 {
                     Name = "Gemini (agy)",
@@ -113,7 +110,6 @@ public static class InitialCatalogFactory
                 ServiceType = AiServiceType.Grok,
                 DisplayName = "Grok",
                 SubTitle = "xAI / SuperGrok",
-                IconGlyph = "𝕏",
                 CliInfo = new CliInfo
                 {
                     Name = "Grok",
@@ -139,7 +135,6 @@ public static class InitialCatalogFactory
                 ServiceType = AiServiceType.Copilot,
                 DisplayName = "Copilot",
                 SubTitle = "GitHub / Copilot Pro",
-                IconGlyph = "🐙",
                 CliInfo = new CliInfo
                 {
                     Name = "Copilot",
