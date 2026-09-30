@@ -420,7 +420,17 @@
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding VisibleErrorCount, StringFormat='エラー {0}件'}"
                                                FontSize="8.5" FontWeight="Bold" Foreground="#F87171"
-                                               VerticalAlignment="Center" Margin="0,0,7,0"/>
+                                               VerticalAlignment="Center" Margin="0,0,7,0">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding VisibleErrorCount}" Value="0">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                     <!-- ログフィルター切り替えピルボタン -->
                                     <Border CornerRadius="3" Background="#161E1C" BorderBrush="#263530" BorderThickness="1" Margin="0,0,6,0" Padding="1">
                                         <StackPanel Orientation="Horizontal">
