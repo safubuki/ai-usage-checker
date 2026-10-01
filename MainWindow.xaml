@@ -74,12 +74,41 @@
                                 Background="#1A2722" Foreground="#34D399" 
                                 BorderBrush="#24513E" BorderThickness="1"
                                 Command="{Binding RefreshAllCommand}"
-                                Cursor="Hand">
-                            <Button.Resources>
-                                <Style TargetType="Border">
-                                    <Setter Property="CornerRadius" Value="4"/>
-                                </Style>
-                            </Button.Resources>
+                                Cursor="Hand" FocusVisualStyle="{x:Null}">
+                            <!-- 起動時の自動更新で無効になっても、標準テーマの白い背景を出さない。 -->
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="refreshBorder" CornerRadius="4"
+                                            Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            Padding="{TemplateBinding Padding}"
+                                            SnapsToDevicePixels="True">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                          RecognizesAccessKey="True"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <MultiTrigger>
+                                            <MultiTrigger.Conditions>
+                                                <Condition Property="IsEnabled" Value="True"/>
+                                                <Condition Property="IsMouseOver" Value="True"/>
+                                            </MultiTrigger.Conditions>
+                                            <Setter TargetName="refreshBorder" Property="Background" Value="#21382C"/>
+                                            <Setter TargetName="refreshBorder" Property="BorderBrush" Value="#2E7255"/>
+                                        </MultiTrigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="refreshBorder" Property="Background" Value="#14261D"/>
+                                            <Setter TargetName="refreshBorder" Property="BorderBrush" Value="#10B981"/>
+                                        </Trigger>
+                                        <Trigger Property="IsKeyboardFocused" Value="True">
+                                            <Setter TargetName="refreshBorder" Property="BorderBrush" Value="#34D399"/>
+                                        </Trigger>
+                                        <Trigger Property="IsEnabled" Value="False">
+                                            <Setter TargetName="refreshBorder" Property="Opacity" Value="0.55"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Button.Template>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="🔄" FontSize="9.5" Margin="0,0,3,0" VerticalAlignment="Center"/>
                                 <TextBlock Text="更新" FontSize="10" FontWeight="Bold" VerticalAlignment="Center"/>
@@ -173,20 +202,22 @@
                 </Grid>
 
                 <!-- 2. 5枚カード配置 (上段3枚、下段2枚を中央揃えで美しくバランス配置) -->
-                <ItemsControl Grid.Row="1" ItemsSource="{Binding Items}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <WrapPanel HorizontalAlignment="Center" VerticalAlignment="Top"/>
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Grid Width="154" Margin="2,2">
-                                <views:UsageCardView MouseLeftButtonUp="Card_MouseLeftButtonUp"/>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <AdornerDecorator Grid.Row="1">
+                    <ItemsControl x:Name="UsageCardsControl" ItemsSource="{Binding Items}" Background="Transparent">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel HorizontalAlignment="Center" VerticalAlignment="Top"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Width="154" Margin="2,2">
+                                    <views:UsageCardView ToolTip="クリックで詳細表示 / ドラッグで並べ替え"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </AdornerDecorator>
 
                 <!-- 3. 詳細ポップアップ (半透明バックドロップ + モーダルオーバーレイ) -->
                 <Grid Grid.Row="0" Grid.RowSpan="2" 

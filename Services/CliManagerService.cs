@@ -95,7 +95,7 @@ public class CliManagerService
                     cli.IsLoggedIn = ClaudeQuotaClient.IsConfigExists();
                     if (!cli.IsLoggedIn)
                     {
-                        cli.StatusMessage = "未ログイン ('claude login' が必要)";
+                        cli.StatusMessage = "未ログイン ('claude auth login' が必要)";
                         Log($"[{cli.Name}] は未ログイン状態です (~/.claude.json 未検出)");
                     }
                 }
@@ -168,133 +168,41 @@ public class CliManagerService
 
         try
         {
-            if (cli.CommandName.Equals("codex", StringComparison.OrdinalIgnoreCase))
+            var (commandName, loginArguments) = cli.CommandName.ToLowerInvariant() switch
             {
-                Log("[Codex] ブラウザでChatGPT認証画面を開きます。承認を完了してください...");
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = "/c start \"Codex Login\" cmd.exe /k \"codex login\"",
-                    UseShellExecute = true
-                };
-                Process.Start(psi);
+                "codex" => ("codex", "login"),
+                "claude" => ("claude", "auth login"),
+                "grok" => ("grok", ""),
+                "copilot" => ("gh", "auth login -w -p https"),
+                "agy" => ("agy", ""),
+                "gemini" => ("gemini", ""),
+                _ => throw new NotSupportedException($"{cli.Name} の認証起動には対応していません。")
+            };
 
-                // 最大60秒間、auth.json の生成をポーリング検知
-                for (int i = 0; i < 60; i++)
-                {
-                    await Task.Delay(1000);
-                    if (CodexQuotaClient.IsAuthFileExists())
-                    {
-                        Log("[Codex] ログイン認証の完了を検知しました！");
-                        cli.IsLoggedIn = true;
-                        cli.StatusMessage = "ログイン完了";
-                        return true;
-                    }
-                }
-
-                Log("[Codex] ログイン待機がタイムアウトしました。ブラウザまたは開いたコンソールウィンドウで認証を完了してください。");
-                cli.StatusMessage = "ログイン待機タイムアウト (要確認)";
-                return false;
-            }
-            else if (cli.CommandName.Equals("claude", StringComparison.OrdinalIgnoreCase))
+            var executablePath = await Task.Run(() =>
+                commandName.Equals(cli.CommandName, StringComparison.OrdinalIgnoreCase)
+                    && File.Exists(cli.ExecutablePath)
+                    ? cli.ExecutablePath
+                    : FindExecutable(commandName));
+            if (string.IsNullOrEmpty(executablePath))
             {
-                Log("[Claude] ブラウザでAnthropic認証画面を開きます。承認を完了してください...");
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = "/c start \"Claude Login\" cmd.exe /k \"claude login\"",
-                    UseShellExecute = true
-                };
-                Process.Start(psi);
-
-                for (int i = 0; i < 60; i++)
-                {
-                    await Task.Delay(1000);
-                    if (ClaudeQuotaClient.IsConfigExists())
-                    {
-                        Log("[Claude] ログイン認証の完了を検知しました！");
-                        cli.IsLoggedIn = true;
-                        cli.StatusMessage = "ログイン完了";
-                        return true;
-                    }
-                }
-                return true;
-            }
-            else if (cli.CommandName.Equals("grok", StringComparison.OrdinalIgnoreCase))
-            {
-                Log("[Grok] xAI認証コンソールを起動します...");
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = "/c start \"Grok Login\" cmd.exe /k \"grok auth login\"",
-                    UseShellExecute = true
-                };
-                Process.Start(psi);
-
-                for (int i = 0; i < 60; i++)
-                {
-                    await Task.Delay(1000);
-                    if (GrokQuotaClient.IsAuthFileExists())
-                    {
-                        Log("[Grok] ログイン認証の完了を検知しました！");
-                        cli.IsLoggedIn = true;
-                        cli.StatusMessage = "ログイン完了";
-                        return true;
-                    }
-                }
-                return true;
-            }
-            else if (cli.CommandName.Equals("copilot", StringComparison.OrdinalIgnoreCase))
-            {
-                Log("[Copilot] GitHub認証コンソールを起動します (ブラウザで認証)...");
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = "/c start \"GitHub Login\" cmd.exe /k \"gh auth login -w -p https\"",
-                    UseShellExecute = true
-                };
-                Process.Start(psi);
-
-                for (int i = 0; i < 60; i++)
-                {
-                    await Task.Delay(1500);
-                    if (CopilotQuotaClient.IsGhAuth())
-                    {
-                        Log("[Copilot] GitHubログイン認証の完了を検知しました！");
-                        cli.IsLoggedIn = true;
-                        cli.StatusMessage = "ログイン完了";
-                        return true;
-                    }
-                }
-                return true;
-            }
-            else if (cli.CommandName.Equals("agy", StringComparison.OrdinalIgnoreCase))
-            {
-                Log("[Antigravity] Antigravity CLIコンソールを起動します...");
-                var agyExe = FindExecutable("agy") ?? "agy";
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = $"/c start \"Antigravity Login\" cmd.exe /k \"\"{agyExe}\"\"",
-                    UseShellExecute = true
-                };
-                Process.Start(psi);
-                return true;
-            }
-            else if (cli.CommandName.Equals("gemini", StringComparison.OrdinalIgnoreCase))
-            {
-                Log("[Gemini] Gemini認証コンソールを起動します...");
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "cmd.exe",
-                    Arguments = "/c start \"Gemini Login\" cmd.exe /k \"gemini login\"",
-                    UseShellExecute = true
-                };
-                Process.Start(psi);
-                return true;
+                throw new FileNotFoundException($"認証に必要な {commandName} が見つかりません。");
             }
 
-            return false;
+            Log($"[{cli.Name}] 認証用の対話コンソールを起動します ({executablePath})...");
+            var psi = CreateLoginStartInfo(executablePath, loginArguments);
+            psi.WorkingDirectory = _userProfile;
+            using var process = Process.Start(psi);
+            if (process == null)
+            {
+                throw new InvalidOperationException("認証コンソールを起動できませんでした。");
+            }
+
+            // 起動成功と認証完了は別。既存の認証ファイルは期限切れでも残るため、
+            // 完了判定は認証後の利用状況再取得で行う。
+            cli.StatusMessage = "認証画面を開きました。完了後に「利用量再取得」を押してください。";
+            Log($"[{cli.Name}] {cli.StatusMessage}");
+            return true;
         }
         catch (Exception ex)
         {
@@ -306,6 +214,28 @@ public class CliManagerService
         {
             cli.IsBusy = false;
         }
+    }
+
+    private static ProcessStartInfo CreateLoginStartInfo(string executablePath, string loginArguments)
+    {
+        var argumentsSuffix = string.IsNullOrEmpty(loginArguments) ? "" : $" {loginArguments}";
+        var psi = new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = $"/d /s /k \"\"{executablePath}\"{argumentsSuffix}\"",
+            UseShellExecute = true,
+            WindowStyle = ProcessWindowStyle.Normal
+        };
+
+        if (Path.GetExtension(executablePath).Equals(".ps1", StringComparison.OrdinalIgnoreCase))
+        {
+            // npm の PowerShell shim しか見つからない場合も対話ウィンドウで実行する。
+            var escapedPath = executablePath.Replace("'", "''");
+            psi.FileName = "powershell.exe";
+            psi.Arguments = $"-NoProfile -NoExit -Command \"& '{escapedPath}'{argumentsSuffix}\"";
+        }
+
+        return psi;
     }
 
     public async Task<bool> InstallCliAsync(CliInfo cli)

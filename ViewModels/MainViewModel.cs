@@ -25,6 +25,7 @@ public class MainViewModel : ViewModelBase
     private bool _isAlwaysOnTop = true;
     private bool _isDocked;
     private bool _isRefreshing;
+    private bool _isItemOperationRunning;
     private string _statusText = "準備完了";
     private readonly List<LogEntry> _allLogEntries = new();
     private ObservableCollection<LogEntry> _consoleLogs = new();
@@ -147,6 +148,7 @@ public class MainViewModel : ViewModelBase
     public RelayCommand<AiUsageItem> LoginCliCommand { get; }
     public RelayCommand<AiUsageItem> UpdateCliCommand { get; }
     public RelayCommand<AiUsageItem> CheckCliCommand { get; }
+    public RelayCommand<AiUsageItem> RefreshUsageCommand { get; }
     public RelayCommand<AiUsageItem> MoveLeftCommand { get; }
     public RelayCommand<AiUsageItem> MoveRightCommand { get; }
     public RelayCommand ToggleDockCommand { get; }
@@ -169,7 +171,8 @@ public class MainViewModel : ViewModelBase
         _isDocked = false; // 起動時は常にメイン画面を表示
 
         // コマンド初期化
-        RefreshAllCommand = new RelayCommand(async () => await RefreshAllAsync());
+        RefreshAllCommand = new RelayCommand(async () => await RefreshAllAsync(),
+            () => !IsRefreshing && !_isItemOperationRunning);
         SelectItemCommand = new RelayCommand<AiUsageItem>(item =>
         {
             if (item != null)
@@ -179,44 +182,34 @@ public class MainViewModel : ViewModelBase
         });
         CloseDetailCommand = new RelayCommand(CloseDetail);
         InstallCliCommand = new RelayCommand<AiUsageItem>(async item =>
-        {
-            if (item != null && !item.CliInfo.IsBusy)
+            await RunItemOperationAsync(item, async current =>
             {
-                await _cliManager.InstallCliAsync(item.CliInfo);
-                await _usageFetcher.FetchUsageAsync(item);
-            }
-        });
+                await _cliManager.InstallCliAsync(current.CliInfo);
+                current.CliInfo.IsBusy = true;
+                await _usageFetcher.FetchUsageAsync(current);
+            }), CanRunItemOperation);
         LoginCliCommand = new RelayCommand<AiUsageItem>(async item =>
-        {
-            if (item != null && !item.CliInfo.IsBusy)
+            await RunItemOperationAsync(item, async current =>
             {
-                var success = await _cliManager.LoginCliAsync(item.CliInfo);
-                if (success)
-                {
-                    await RefreshAllAsync(isSilent: false);
-                }
-                else
-                {
-                    await _usageFetcher.FetchUsageAsync(item);
-                }
-            }
-        });
+                // 起動成功と認証完了は別。認証後は詳細の再取得で最新の状態を確認する。
+                await _cliManager.LoginCliAsync(current.CliInfo);
+            }), CanRunItemOperation);
         UpdateCliCommand = new RelayCommand<AiUsageItem>(async item =>
-        {
-            if (item != null && !item.CliInfo.IsBusy)
+            await RunItemOperationAsync(item, async current =>
             {
-                await _cliManager.UpdateCliAsync(item.CliInfo);
-                await _usageFetcher.FetchUsageAsync(item);
-            }
-        });
+                await _cliManager.UpdateCliAsync(current.CliInfo);
+                current.CliInfo.IsBusy = true;
+                await _usageFetcher.FetchUsageAsync(current);
+            }), CanRunItemOperation);
         CheckCliCommand = new RelayCommand<AiUsageItem>(async item =>
-        {
-            if (item != null && !item.CliInfo.IsBusy)
+            await RunItemOperationAsync(item, async current =>
             {
-                await _cliManager.CheckCliStatusAsync(item.CliInfo);
-                await _usageFetcher.FetchUsageAsync(item);
-            }
-        });
+                await _cliManager.CheckCliStatusAsync(current.CliInfo);
+                current.CliInfo.IsBusy = true;
+                await _usageFetcher.FetchUsageAsync(current);
+            }), CanRunItemOperation);
+        RefreshUsageCommand = new RelayCommand<AiUsageItem>(async item =>
+            await RunItemOperationAsync(item, current => _usageFetcher.FetchUsageAsync(current)), CanRunItemOperation);
 
         MoveLeftCommand = new RelayCommand<AiUsageItem>(MoveItemLeft);
         MoveRightCommand = new RelayCommand<AiUsageItem>(MoveItemRight);
@@ -411,8 +404,9 @@ public class MainViewModel : ViewModelBase
 
     public async Task RefreshAllAsync(bool isSilent = false, bool checkCliStatus = true)
     {
-        if (IsRefreshing) return;
+        if (IsRefreshing || _isItemOperationRunning) return;
         IsRefreshing = true;
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
 
         if (!isSilent)
         {
@@ -492,6 +486,34 @@ public class MainViewModel : ViewModelBase
         finally
         {
             IsRefreshing = false;
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    private bool CanRunItemOperation(AiUsageItem? item) =>
+        item != null && !IsRefreshing && !_isItemOperationRunning && !item.CliInfo.IsBusy;
+
+    private async Task RunItemOperationAsync(AiUsageItem? item, Func<AiUsageItem, Task> operation)
+    {
+        if (!CanRunItemOperation(item)) return;
+        var current = item!;
+        _isItemOperationRunning = true;
+        current.CliInfo.IsBusy = true;
+        System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        try
+        {
+            await operation(current);
+        }
+        catch (Exception ex)
+        {
+            current.CliInfo.StatusMessage = $"操作エラー: {ex.Message}";
+            AddLog($"[{current.CliInfo.Name}] 操作エラー: {ex.Message}");
+        }
+        finally
+        {
+            current.CliInfo.IsBusy = false;
+            _isItemOperationRunning = false;
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
         }
     }
 

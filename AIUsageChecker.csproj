@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <DefaultItemExcludes>$(DefaultItemExcludes);tests\**</DefaultItemExcludes>
 
     <ApplicationIcon>assets\app.ico</ApplicationIcon>
     <AssemblyTitle>Turtle AI Usage Checker</AssemblyTitle>
@@ -24,6 +25,11 @@
 
   <ItemGroup>
     <PackageReference Include="System.Management" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="tests\**\*.cs" />
+    <InternalsVisibleTo Include="AIUsageChecker.RegressionTests" />
   </ItemGroup>
 
 </Project>

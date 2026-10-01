@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -38,8 +39,14 @@ public class GrokProductUsage
 
 public class GrokQuotaClient
 {
-    private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(6) };
+    private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(6) };
+    private readonly HttpClient _httpClient;
     public event Action<string>? LogOutputReceived;
+
+    public GrokQuotaClient(HttpClient? httpClient = null)
+    {
+        _httpClient = httpClient ?? SharedHttpClient;
+    }
 
     public static string GetAuthFilePath()
     {
@@ -52,12 +59,15 @@ public class GrokQuotaClient
         return File.Exists(GetAuthFilePath());
     }
 
-    public async Task<GrokQuotaData?> FetchGrokQuotaAsync()
+    public Task<GrokQuotaData?> FetchGrokQuotaAsync()
+    {
+        return FetchGrokQuotaAsync(GetAuthFilePath());
+    }
+
+    internal async Task<GrokQuotaData?> FetchGrokQuotaAsync(string authFilePath, string? fallbackLogPath = null)
     {
         try
         {
-            var authFilePath = GetAuthFilePath();
-
             if (!File.Exists(authFilePath))
             {
                 LogOutputReceived?.Invoke("[Grok] ~/.grok/auth.json が見つかりません（未ログインまたはGrok CLI未インストール）");
@@ -69,7 +79,7 @@ public class GrokQuotaClient
             if (authNode is not JsonObject authObj || authObj.Count == 0)
             {
                 LogOutputReceived?.Invoke("[Grok] auth.json のパースに失敗しました");
-                return TryFallbackFromLog();
+                return TryFallbackFromLog(fallbackLogPath);
             }
 
             // OIDC / APIキー エントリの取得
@@ -106,30 +116,37 @@ public class GrokQuotaClient
             if (string.IsNullOrEmpty(tokenKey))
             {
                 LogOutputReceived?.Invoke("[Grok] auth.json 内に認証キーが見つかりません");
-                return TryFallbackFromLog();
+                return TryFallbackFromLog(fallbackLogPath);
             }
+
+            bool attemptedRefresh = false;
+            bool refreshRequiresAuth = false;
 
             // トークンの有効期限チェック（期限切れまたは3分以内の失効なら自動リフレッシュ）
             if (expiresAt.HasValue && DateTime.UtcNow.AddMinutes(3) >= expiresAt.Value && !string.IsNullOrEmpty(refreshToken) && !string.IsNullOrEmpty(clientId))
             {
                 LogOutputReceived?.Invoke("[Grok] トークンの有効期限が近づいているため、自動リフレッシュを実行します...");
-                var refreshedToken = await RefreshTokenAsync(issuer ?? "https://auth.x.ai", clientId, refreshToken, authFilePath, entryKey);
-                if (!string.IsNullOrEmpty(refreshedToken))
+                attemptedRefresh = true;
+                var refreshResult = await RefreshTokenAsync(issuer ?? "https://auth.x.ai", clientId, refreshToken, authFilePath, entryKey);
+                refreshRequiresAuth = refreshResult.IsAuthRequired;
+                if (!string.IsNullOrEmpty(refreshResult.AccessToken))
                 {
-                    tokenKey = refreshedToken;
+                    tokenKey = refreshResult.AccessToken;
                 }
             }
 
             // API 呼び出し
             var data = await RequestBillingAsync(tokenKey);
-            if (data == null && !string.IsNullOrEmpty(refreshToken) && !string.IsNullOrEmpty(clientId))
+            if ((data == null || data.IsAuthRequired) && !attemptedRefresh &&
+                !string.IsNullOrEmpty(refreshToken) && !string.IsNullOrEmpty(clientId))
             {
-                // 401 等で失敗した可能性があるため、強制リフレッシュして再試行
+                // 同じ取得処理では一度だけリフレッシュする。更新時に無効化された旧refresh_tokenを再利用しない。
                 LogOutputReceived?.Invoke("[Grok] トークン強制リフレッシュして再試行します...");
-                var refreshedToken = await RefreshTokenAsync(issuer ?? "https://auth.x.ai", clientId, refreshToken, authFilePath, entryKey);
-                if (!string.IsNullOrEmpty(refreshedToken))
+                var refreshResult = await RefreshTokenAsync(issuer ?? "https://auth.x.ai", clientId, refreshToken, authFilePath, entryKey);
+                refreshRequiresAuth = refreshResult.IsAuthRequired;
+                if (!string.IsNullOrEmpty(refreshResult.AccessToken))
                 {
-                    data = await RequestBillingAsync(refreshedToken);
+                    data = await RequestBillingAsync(refreshResult.AccessToken);
                 }
             }
 
@@ -138,13 +155,23 @@ public class GrokQuotaClient
                 return data;
             }
 
+            // 認証失敗を過去のログで隠さず、詳細画面で再認証できる状態にする。
+            if (data?.IsAuthRequired == true)
+            {
+                return data;
+            }
+            if (refreshRequiresAuth && expiresAt.HasValue && expiresAt.Value <= DateTime.UtcNow)
+            {
+                return CreateAuthRequiredData("認証の有効期限が切れています ('grok' で再認証が必要)");
+            }
+
             // API が取れなかった場合はログからフォールバック
-            return TryFallbackFromLog() ?? data;
+            return TryFallbackFromLog(fallbackLogPath) ?? data;
         }
         catch (Exception ex)
         {
             LogOutputReceived?.Invoke($"[Grok] 取得例外: {ex.Message}");
-            return TryFallbackFromLog();
+            return TryFallbackFromLog(fallbackLogPath);
         }
     }
 
@@ -158,10 +185,14 @@ public class GrokQuotaClient
             req.Headers.Add("User-Agent", "grok-shell/1.0.25");
             req.Headers.Add("Accept", "application/json");
 
-            var response = await HttpClient.SendAsync(req);
+            using var response = await _httpClient.SendAsync(req);
             if (!response.IsSuccessStatusCode)
             {
                 LogOutputReceived?.Invoke($"[Grok] HTTP エラー: {(int)response.StatusCode} {response.ReasonPhrase}");
+                if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+                {
+                    return CreateAuthRequiredData($"認証エラー (HTTP {(int)response.StatusCode})。'grok' で再認証してください");
+                }
                 return null;
             }
 
@@ -368,7 +399,12 @@ public class GrokQuotaClient
         return new string(chars.ToArray());
     }
 
-    private async Task<string?> RefreshTokenAsync(string issuer, string clientId, string refreshToken, string authFilePath, string entryKey)
+    private static GrokQuotaData CreateAuthRequiredData(string message)
+    {
+        return new GrokQuotaData { IsSuccess = false, IsAuthRequired = true, ErrorMessage = message };
+    }
+
+    private async Task<(string? AccessToken, bool IsAuthRequired)> RefreshTokenAsync(string issuer, string clientId, string refreshToken, string authFilePath, string entryKey)
     {
         try
         {
@@ -386,11 +422,25 @@ public class GrokQuotaClient
             };
             req.Headers.Add("User-Agent", "grok-shell/1.0.25");
 
-            var resp = await HttpClient.SendAsync(req);
+            using var resp = await _httpClient.SendAsync(req);
             if (!resp.IsSuccessStatusCode)
             {
                 LogOutputReceived?.Invoke($"[Grok] トークンリフレッシュ失敗: {(int)resp.StatusCode} {resp.ReasonPhrase}");
-                return null;
+                bool isAuthRequired = resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
+                if (resp.StatusCode == HttpStatusCode.BadRequest)
+                {
+                    try
+                    {
+                        using var errorDoc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+                        isAuthRequired = errorDoc.RootElement.TryGetProperty("error", out var error) &&
+                            error.ValueKind == JsonValueKind.String && error.GetString() == "invalid_grant";
+                    }
+                    catch (JsonException)
+                    {
+                        // 応答を解析できない場合は通信エラーとして扱う。
+                    }
+                }
+                return (null, isAuthRequired);
             }
 
             var json = await resp.Content.ReadAsStringAsync();
@@ -403,7 +453,7 @@ public class GrokQuotaClient
 
             if (string.IsNullOrEmpty(newAccessToken))
             {
-                return null;
+                return (null, false);
             }
 
             // auth.json を安全に更新
@@ -430,21 +480,21 @@ public class GrokQuotaClient
                 LogOutputReceived?.Invoke($"[Grok] auth.json 保存失敗 (インメモリのみ使用): {ex.Message}");
             }
 
-            return newAccessToken;
+            return (newAccessToken, false);
         }
         catch (Exception ex)
         {
             LogOutputReceived?.Invoke($"[Grok] トークンリフレッシュ例外: {ex.Message}");
-            return null;
+            return (null, false);
         }
     }
 
-    private GrokQuotaData? TryFallbackFromLog()
+    private GrokQuotaData? TryFallbackFromLog(string? logPath = null)
     {
         try
         {
             var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var logPath = Path.Combine(userProfile, ".grok", "logs", "unified.jsonl");
+            logPath ??= Path.Combine(userProfile, ".grok", "logs", "unified.jsonl");
             if (!File.Exists(logPath)) return null;
 
             using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);

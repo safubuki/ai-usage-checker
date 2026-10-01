@@ -17,6 +17,7 @@ public class UsageFetcherService
     private readonly CopilotQuotaClient _copilotClient = new();
     private readonly ClaudeQuotaClient _claudeClient = new();
     private readonly GrokQuotaClient _grokClient = new();
+    private readonly System.Threading.SemaphoreSlim _fetchLock = new(1, 1);
     private readonly string _cacheFilePath;
     private List<QuotaGroup>? _cachedGroups;
     private CodexQuotaData? _lastCodexData;
@@ -37,11 +38,16 @@ public class UsageFetcherService
     public event Action<string>? LogOutputReceived;
 
     public UsageFetcherService()
+        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "AIUsageChecker", "quota_cache.json"))
     {
-        var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var dir = Path.Combine(appData, "AIUsageChecker");
-        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-        _cacheFilePath = Path.Combine(dir, "quota_cache.json");
+    }
+
+    protected UsageFetcherService(string cacheFilePath)
+    {
+        _cacheFilePath = cacheFilePath;
+        var dir = Path.GetDirectoryName(cacheFilePath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
         _agyClient.LogOutputReceived += msg => LogOutputReceived?.Invoke(msg);
         _codexClient.LogOutputReceived += msg => LogOutputReceived?.Invoke(msg);
@@ -63,14 +69,34 @@ public class UsageFetcherService
 
     public async Task FetchAllRawDataAsync()
     {
-        LogOutputReceived?.Invoke($"[{DateTime.Now:HH:mm:ss}] 全AI利用状況の取得を開始...");
+        await FetchRawDataAsync(null);
+    }
+
+    private async Task FetchRawDataAsync(AiServiceType? serviceType)
+    {
+        // 全体更新と詳細からの再取得が、認証情報の更新やキャッシュ保存で競合しないようにする。
+        await _fetchLock.WaitAsync();
+        try
+        {
+            await FetchRawDataCoreAsync(serviceType);
+        }
+        finally
+        {
+            _fetchLock.Release();
+        }
+    }
+
+    private async Task FetchRawDataCoreAsync(AiServiceType? serviceType)
+    {
+        var targetName = serviceType?.ToString() ?? "全AI";
+        LogOutputReceived?.Invoke($"[{DateTime.Now:HH:mm:ss}] [{targetName}] 利用状況の取得を開始...");
 
         // 各AIサービスの生データ取得を並列実行して高速化
-        var codexTask = Task.Run(async () =>
+        var codexTask = serviceType is null or AiServiceType.GPT ? Task.Run(async () =>
         {
             try
             {
-                var data = await _codexClient.FetchCodexQuotaAsync();
+                var data = await FetchCodexQuotaAsync();
                 if (data != null && data.IsSuccess)
                 {
                     _lastCodexData = data;
@@ -93,13 +119,13 @@ public class UsageFetcherService
                 _codexDataIsStale = true;
                 LogOutputReceived?.Invoke($"[Codex] 取得例外: {ex.Message}");
             }
-        });
+        }) : Task.CompletedTask;
 
-        var claudeTask = Task.Run(async () =>
+        var claudeTask = serviceType is null or AiServiceType.Claude ? Task.Run(async () =>
         {
             try
             {
-                var data = await _claudeClient.FetchClaudeQuotaAsync();
+                var data = await FetchClaudeQuotaAsync();
                 if (data.IsSuccess)
                 {
                     _lastClaudeData = data;
@@ -129,21 +155,13 @@ public class UsageFetcherService
                 _claudeDataIsStale = true;
                 LogOutputReceived?.Invoke($"[Claude] 取得例外: {ex.Message}");
             }
-        });
+        }) : Task.CompletedTask;
 
-        var geminiTask = Task.Run(async () =>
+        var geminiTask = serviceType is null or AiServiceType.Gemini ? Task.Run(async () =>
         {
             try
             {
-                // 1. Antigravity CLI ('agy') からの直接取得を優先試行
-                var groups = await _agyClient.FetchQuotaSummaryAsync();
-
-                // 2. CLI から取得できなかった場合は起動中の IDE 言語サーバーをフォールバックとして試行
-                if (!HasUsableGeminiQuota(groups))
-                {
-                    LogOutputReceived?.Invoke("[Antigravity] CLIより取得できなかったため、IDE言語サーバーをフォールバック確認します...");
-                    groups = await _quotaClient.FetchQuotaSummaryAsync();
-                }
+                var groups = await FetchGeminiQuotaAsync();
 
                 if (HasUsableGeminiQuota(groups))
                 {
@@ -161,13 +179,13 @@ public class UsageFetcherService
                 _geminiDataIsStale = true;
                 LogOutputReceived?.Invoke($"[Antigravity] クォータ取得例外: {ex.Message}");
             }
-        });
+        }) : Task.CompletedTask;
 
-        var copilotTask = Task.Run(async () =>
+        var copilotTask = serviceType is null or AiServiceType.Copilot ? Task.Run(async () =>
         {
             try
             {
-                var data = await _copilotClient.FetchCopilotQuotaAsync();
+                var data = await FetchCopilotQuotaAsync();
                 if (data?.IsSuccess == true)
                 {
                     _lastCopilotData = data;
@@ -189,13 +207,13 @@ public class UsageFetcherService
                 _copilotDataIsStale = true;
                 LogOutputReceived?.Invoke($"[Copilot] 取得例外: {ex.Message}");
             }
-        });
+        }) : Task.CompletedTask;
 
-        var grokTask = Task.Run(async () =>
+        var grokTask = serviceType is null or AiServiceType.Grok ? Task.Run(async () =>
         {
             try
             {
-                var data = await _grokClient.FetchGrokQuotaAsync();
+                var data = await FetchGrokQuotaAsync();
                 if (data?.IsSuccess == true)
                 {
                     _lastGrokData = data;
@@ -224,11 +242,27 @@ public class UsageFetcherService
                 _grokDataIsStale = true;
                 LogOutputReceived?.Invoke($"[Grok] 取得例外: {ex.Message}");
             }
-        });
+        }) : Task.CompletedTask;
 
         await Task.WhenAll(codexTask, claudeTask, geminiTask, copilotTask, grokTask);
         await Task.Run(SaveCache);
-        LogOutputReceived?.Invoke($"[{DateTime.Now:HH:mm:ss}] 全AI利用状況の生データ取得完了。");
+        LogOutputReceived?.Invoke($"[{DateTime.Now:HH:mm:ss}] [{targetName}] 利用状況の生データ取得完了。");
+    }
+
+    protected virtual Task<CodexQuotaData?> FetchCodexQuotaAsync() => _codexClient.FetchCodexQuotaAsync();
+    protected virtual Task<ClaudeQuotaData> FetchClaudeQuotaAsync() => _claudeClient.FetchClaudeQuotaAsync();
+    protected virtual Task<CopilotQuotaData?> FetchCopilotQuotaAsync() => _copilotClient.FetchCopilotQuotaAsync();
+    protected virtual Task<GrokQuotaData?> FetchGrokQuotaAsync() => _grokClient.FetchGrokQuotaAsync();
+
+    protected virtual async Task<List<QuotaGroup>?> FetchGeminiQuotaAsync()
+    {
+        var groups = await _agyClient.FetchQuotaSummaryAsync();
+        if (!HasUsableGeminiQuota(groups))
+        {
+            LogOutputReceived?.Invoke("[Antigravity] CLIより取得できなかったため、IDE言語サーバーをフォールバック確認します...");
+            groups = await _quotaClient.FetchQuotaSummaryAsync();
+        }
+        return groups;
     }
 
     public void ApplyUsage(AiUsageItem item)
@@ -321,14 +355,15 @@ public class UsageFetcherService
 
     public async Task FetchUsageAsync(AiUsageItem item)
     {
+        await FetchRawDataAsync(item.ServiceType);
         ApplyUsage(item);
-        await Task.CompletedTask;
     }
 
     private void ApplyGptQuota(AiUsageItem item)
     {
         if (_lastCodexData != null && _lastCodexData.IsSuccess)
         {
+            if (!_codexDataIsStale) item.CliInfo.IsLoggedIn = true;
             item.CliInfo.IsSubscribed = true;
             item.CliInfo.StatusMessage = $"プラン: {_lastCodexData.PlanType.ToUpper()} (稼働中)";
 
@@ -460,6 +495,7 @@ public class UsageFetcherService
     {
         if (_lastClaudeData?.IsSuccess == true && _lastClaudeData.IsSubscribed)
         {
+            item.CliInfo.IsLoggedIn = true;
             // 契約中（Claude Pro / Max / Team等）
             item.CliInfo.IsSubscribed = true;
             item.CliInfo.StatusMessage = _lastClaudeData.StatusMessage;
@@ -513,9 +549,10 @@ public class UsageFetcherService
         else
         {
             // 未契約、未ログイン、または初回の一時的な取得失敗
-            bool isConfigExists = ClaudeQuotaClient.IsConfigExists();
+            bool isConfigExists = _lastClaudeData?.IsSuccess == true ||
+                (_lastClaudeData?.IsAuthRequired != true && ClaudeQuotaClient.IsConfigExists());
             bool isTemporaryFailure = isConfigExists && _lastClaudeData?.IsSuccess == false && _lastClaudeData.IsAuthRequired == false;
-            item.CliInfo.IsLoggedIn = isConfigExists;
+            item.CliInfo.IsLoggedIn = isConfigExists && _lastClaudeData?.IsAuthRequired != true;
             item.CliInfo.IsSubscribed = isTemporaryFailure;
 
             item.PrimaryLimit.Title = "契約ステータス";
@@ -528,11 +565,11 @@ public class UsageFetcherService
                 item.PrimaryLimit.ResetTimeText = "取得待機";
                 item.CliInfo.StatusMessage = "Claude 接続待機中 (通信・形式エラー)";
             }
-            else if (!isConfigExists)
+            else if (!item.CliInfo.IsLoggedIn)
             {
-                item.PrimaryLimit.LimitDescription = "Claude 未ログイン ('claude login' で連携)";
+                item.PrimaryLimit.LimitDescription = "Claude 未ログイン ('claude auth login' で連携)";
                 item.PrimaryLimit.ResetTimeText = "要ログイン";
-                item.CliInfo.StatusMessage = "未ログイン ('claude login' が必要)";
+                item.CliInfo.StatusMessage = "未ログイン ('claude auth login' が必要)";
             }
             else
             {
@@ -722,7 +759,7 @@ public class UsageFetcherService
         else
         {
             // 未ログインまたは取得失敗（偽のハードコードフォールバックを撤廃）
-            bool isLoggedIn = GrokQuotaClient.IsAuthFileExists();
+            bool isLoggedIn = _lastGrokData?.IsAuthRequired != true && GrokQuotaClient.IsAuthFileExists();
             item.CliInfo.IsLoggedIn = isLoggedIn;
             item.CliInfo.IsSubscribed = isLoggedIn;
             item.CliInfo.StatusMessage = isLoggedIn 
@@ -770,7 +807,7 @@ public class UsageFetcherService
         else
         {
             // 未ログインまたは取得失敗（偽のハードコードフォールバックを撤廃）
-            bool isGhAuth = CopilotQuotaClient.IsGhAuth();
+            bool isGhAuth = _lastCopilotData?.IsAuthRequired != true && CopilotQuotaClient.IsGhAuth();
             item.CliInfo.IsLoggedIn = isGhAuth;
             item.CliInfo.IsSubscribed = isGhAuth;
             item.CliInfo.StatusMessage = isGhAuth 

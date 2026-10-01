@@ -36,49 +36,55 @@ public class ClaudeQuotaClient
         return File.Exists(GetConfigFilePath());
     }
 
-    public async Task<ClaudeQuotaData> FetchClaudeQuotaAsync()
+    public Task<ClaudeQuotaData> FetchClaudeQuotaAsync()
+    {
+        return FetchClaudeQuotaAsync(GetConfigFilePath());
+    }
+
+    internal async Task<ClaudeQuotaData> FetchClaudeQuotaAsync(string configFilePath)
     {
         var result = new ClaudeQuotaData();
 
         try
         {
-            var claudeJsonPath = GetConfigFilePath();
-
-            if (!File.Exists(claudeJsonPath))
+            if (!File.Exists(configFilePath))
             {
                 result.IsSubscribed = false;
                 result.IsAuthRequired = true;
-                result.StatusMessage = "未ログイン ('claude login' が必要)";
+                result.StatusMessage = "未ログイン ('claude auth login' が必要)";
                 LogOutputReceived?.Invoke("[Claude] ~/.claude.json が見つかりません（未ログイン）");
                 return result;
             }
 
-            var jsonText = await File.ReadAllTextAsync(claudeJsonPath);
+            var jsonText = await File.ReadAllTextAsync(configFilePath);
             using var doc = JsonDocument.Parse(jsonText);
             var root = doc.RootElement;
 
             // 1. アカウントおよび契約状態の判定
-            bool isSubscribed = false;
-            string planName = "Claude";
-
-            if (root.TryGetProperty("oauthAccount", out var oauthElem) && oauthElem.ValueKind == JsonValueKind.Object)
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("oauthAccount", out var oauthElem) || oauthElem.ValueKind != JsonValueKind.Object)
             {
-                string billingType = oauthElem.TryGetProperty("billingType", out var bt) ? (bt.GetString() ?? "") : "";
-                string orgType = oauthElem.TryGetProperty("organizationType", out var ot) ? (ot.GetString() ?? "") : "";
-
-                // billingType が "none" 以外、または有料プラン契約時
-                if (!string.IsNullOrEmpty(billingType) && !billingType.Equals("none", StringComparison.OrdinalIgnoreCase))
-                {
-                    isSubscribed = true;
-                }
-                else if (orgType.Contains("pro", StringComparison.OrdinalIgnoreCase) && !billingType.Equals("none", StringComparison.OrdinalIgnoreCase))
-                {
-                    isSubscribed = true;
-                }
-
-                planName = orgType.Contains("pro", StringComparison.OrdinalIgnoreCase) ? "Claude Pro" : "Claude";
+                result.IsAuthRequired = true;
+                result.StatusMessage = "未ログイン ('claude auth login' が必要)";
+                LogOutputReceived?.Invoke("[Claude] 設定にログイン済みアカウントが見つかりません（未ログイン）");
+                return result;
             }
 
+            bool isSubscribed = false;
+            string billingType = oauthElem.TryGetProperty("billingType", out var bt) ? (bt.GetString() ?? "") : "";
+            string orgType = oauthElem.TryGetProperty("organizationType", out var ot) ? (ot.GetString() ?? "") : "";
+
+            // billingType が "none" 以外、または有料プラン契約時
+            if (!string.IsNullOrEmpty(billingType) && !billingType.Equals("none", StringComparison.OrdinalIgnoreCase))
+            {
+                isSubscribed = true;
+            }
+            else if (orgType.Contains("pro", StringComparison.OrdinalIgnoreCase) && !billingType.Equals("none", StringComparison.OrdinalIgnoreCase))
+            {
+                isSubscribed = true;
+            }
+
+            string planName = orgType.Contains("pro", StringComparison.OrdinalIgnoreCase) ? "Claude Pro" : "Claude";
             result.IsSubscribed = isSubscribed;
             result.PlanName = planName;
 

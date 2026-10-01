@@ -7,6 +7,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using AIUsageChecker.Models;
+using AIUsageChecker.Controls;
 using AIUsageChecker.ViewModels;
 
 namespace AIUsageChecker;
@@ -40,6 +41,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = new MainViewModel();
         DataContext = _viewModel;
+        _ = new UsageCardDragDrop(UsageCardsControl, _viewModel.MoveItem, _viewModel.OpenDetail);
 
         Loaded += MainWindow_Loaded;
     }
@@ -189,14 +191,6 @@ public partial class MainWindow : Window
         if (e.ButtonState == MouseButtonState.Pressed)
         {
             DragMove();
-        }
-    }
-
-    private void Card_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (sender is FrameworkElement fe && fe.DataContext is AiUsageItem item)
-        {
-            _viewModel.OpenDetail(item);
         }
     }
 

@@ -253,17 +253,4 @@ public class AiUsageItem : ViewModelBase
             _ => "#22C55E"
         };
     }
-
-    public string LoginButtonText
-    {
-        get => ServiceType switch
-        {
-            AiServiceType.GPT => "🔑 ChatGPTにログイン",
-            AiServiceType.Claude => "🔑 Claudeにログイン",
-            AiServiceType.Grok => "🔑 xAI (Grok) にログイン",
-            AiServiceType.Copilot => "🔑 GitHub (Copilot) にログイン",
-            AiServiceType.Gemini => "🔑 Google (Gemini) にログイン",
-            _ => "🔑 ログイン (認証連携)"
-        };
-    }
 }

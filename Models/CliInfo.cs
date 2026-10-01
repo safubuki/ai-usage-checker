@@ -27,6 +27,7 @@ public class CliInfo : ViewModelBase
             if (SetProperty(ref _hasUsageError, value))
             {
                 OnPropertyChanged(nameof(StatusBadgeText));
+                OnPropertyChanged(nameof(CanAuthenticate));
             }
         }
     }
@@ -39,6 +40,7 @@ public class CliInfo : ViewModelBase
             if (SetProperty(ref _isLoggedIn, value))
             {
                 OnPropertyChanged(nameof(StatusBadgeText));
+                OnPropertyChanged(nameof(CanAuthenticate));
             }
         }
     }
@@ -87,6 +89,7 @@ public class CliInfo : ViewModelBase
             if (SetProperty(ref _isInstalled, value))
             {
                 OnPropertyChanged(nameof(StatusBadgeText));
+                OnPropertyChanged(nameof(CanAuthenticate));
             }
         }
     }
@@ -138,6 +141,8 @@ public class CliInfo : ViewModelBase
         get => _executablePath;
         set => SetProperty(ref _executablePath, value);
     }
+
+    public bool CanAuthenticate => IsInstalled && (!IsLoggedIn || HasUsageError);
 
     public string StatusBadgeText
     {
