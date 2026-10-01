@@ -16,8 +16,8 @@
         <converters:StatusBadgeTextBrushConverter x:Key="StatusBadgeTextBrushConverter"/>
         <Style x:Key="CliActionButton" TargetType="Button">
             <Setter Property="SnapsToDevicePixels" Value="True"/>
-            <Setter Property="Width" Value="86"/>
-            <Setter Property="Height" Value="22"/>
+            <Setter Property="Width" Value="76"/>
+            <Setter Property="Height" Value="16"/>
             <Setter Property="FontSize" Value="10"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Padding" Value="6,0"/>
@@ -349,8 +349,8 @@
                                 <WrapPanel>
                                     <Button Content="利用量再取得"
                                             Style="{StaticResource CliActionButton}"
-                                            Background="#065F46" Foreground="#FFFFFF"
-                                            BorderThickness="0"
+                                            Background="#244A37" Foreground="#DDEBE2"
+                                            BorderBrush="#3A624B" BorderThickness="1"
                                             Command="{Binding RefreshUsageCommand}"
                                             CommandParameter="{Binding SelectedItem}"
                                             IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
@@ -358,8 +358,8 @@
                                     <!-- 未インストール時: ワンクリックインストールボタン -->
                                     <Button Content="インストール"
                                             Style="{StaticResource CliActionButton}"
-                                            Background="#10B981" Foreground="#FFFFFF"
-                                            BorderThickness="0"
+                                            Background="#244A37" Foreground="#DDEBE2"
+                                            BorderBrush="#3A624B" BorderThickness="1"
                                             Command="{Binding InstallCliCommand}"
                                             CommandParameter="{Binding SelectedItem}"
                                             IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
@@ -369,8 +369,8 @@
                                     <!-- 未ログイン・取得エラー時に認証を案内する -->
                                     <Button Content="認証"
                                             Style="{StaticResource CliActionButton}"
-                                            Background="#10B981" Foreground="#FFFFFF"
-                                            BorderThickness="0"
+                                            Background="#244A37" Foreground="#DDEBE2"
+                                            BorderBrush="#3A624B" BorderThickness="1"
                                             Command="{Binding LoginCliCommand}"
                                             CommandParameter="{Binding SelectedItem}"
                                             IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
@@ -378,17 +378,17 @@
                                             Visibility="{Binding SelectedItem.CliInfo.CanAuthenticate, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
                                     <!-- 更新あり時: 最新アップデートボタン -->
-                                    <Button Content="更新"
+                                    <Button Content="CLI更新"
                                             Style="{StaticResource CliActionButton}"
-                                            Background="#3B82F6" Foreground="#FFFFFF"
-                                            BorderThickness="0"
+                                            Background="#D97706" Foreground="#FFFBEB"
+                                            BorderBrush="#F59E0B" BorderThickness="1"
                                             Command="{Binding UpdateCliCommand}"
                                             CommandParameter="{Binding SelectedItem}"
                                             IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
                                             ToolTip="CLIツールを最新バージョンに更新します"
                                             Visibility="{Binding SelectedItem.CliInfo.HasUpdate, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
-                                    <!-- 更新確認ボタン -->
+                                    <!-- 更新未検出時のみ更新確認ボタンを表示 -->
                                     <Button Content="CLI更新確認"
                                             Style="{StaticResource CliActionButton}"
                                             Background="#262E2B" Foreground="#D1D5DB"
@@ -396,7 +396,8 @@
                                             Command="{Binding CheckCliCommand}"
                                             CommandParameter="{Binding SelectedItem}"
                                             IsEnabled="{Binding SelectedItem.CliInfo.IsBusy, Converter={StaticResource InverseBooleanConverter}}"
-                                            ToolTip="CLIツールの更新を確認します"/>
+                                            ToolTip="CLIツールの更新を確認します"
+                                            Visibility="{Binding SelectedItem.CliInfo.HasUpdate, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=Inverse}"/>
                                 </WrapPanel>
                                 <TextBlock x:Name="AuthRecoveryHint" Text="認証後に「利用量再取得」を押してください。"
                                            FontSize="9" Foreground="#9CA3AF" Margin="0,6,0,0"

@@ -101,7 +101,7 @@ internal static class DetailViewChecks
             foreach (var (button, label) in new[]
             {
                 (refresh, "利用量再取得"), (login, "認証"), (checkUpdate, "CLI更新確認"),
-                (update, "更新"), (install, "インストール")
+                (update, "CLI更新"), (install, "インストール")
             })
             {
                 Check.Equal(label, button.Content as string, $"{name}: ボタンの短いラベルが一致しません");
@@ -109,6 +109,26 @@ internal static class DetailViewChecks
             }
             AssertActionButtonLayout(actions, name);
             AssertButtonsFitParent(buttons, name);
+
+            Check.Equal(Visibility.Visible, update.Visibility, $"{name}: 更新検出時はCLI更新を表示してください");
+            Check.Equal(Visibility.Collapsed, checkUpdate.Visibility, $"{name}: 更新検出時はCLI更新確認を隠してください");
+
+            item.CliInfo.HasUpdate = false;
+            Arrange(view);
+            Check.Equal(Visibility.Collapsed, update.Visibility, $"{name}: 最新時はCLI更新を隠してください");
+            Check.Equal(Visibility.Visible, checkUpdate.Visibility, $"{name}: 最新時はCLI更新確認を表示してください");
+            AssertActionButtonLayout(actions, name);
+            if (serviceType == AiServiceType.Grok)
+            {
+                ((ScrollViewer)view.FindName("DetailScrollViewer")).ScrollToVerticalOffset(45);
+                Arrange(view);
+                SaveImage(view, "detail-cli-current.png");
+            }
+
+            item.CliInfo.HasUpdate = true;
+            Arrange(view);
+            Check.Equal(Visibility.Visible, update.Visibility, $"{name}: 再検出時はCLI更新を再表示してください");
+            Check.Equal(Visibility.Collapsed, checkUpdate.Visibility, $"{name}: 再検出時はCLI更新確認を再度隠してください");
 
             if (serviceType == AiServiceType.Grok)
             {
@@ -277,8 +297,8 @@ internal static class DetailViewChecks
         foreach (var button in buttons)
         {
             var label = button.Content as string;
-            Check.Equal(86d, button.Width, $"{name}: {label}のボタン幅が共通ではありません");
-            Check.Equal(22d, button.Height, $"{name}: {label}のボタン高さが共通ではありません");
+            Check.Equal(76d, button.Width, $"{name}: {label}のボタン幅が共通ではありません");
+            Check.Equal(16d, button.Height, $"{name}: {label}のボタン高さが共通ではありません");
             Check.Equal(reference.Margin, button.Margin, $"{name}: {label}のボタン余白が共通ではありません");
             Check.Equal(reference.Padding, button.Padding, $"{name}: {label}のボタン内側余白が共通ではありません");
             Check.Equal(reference.FontSize, button.FontSize, $"{name}: {label}の文字サイズが共通ではありません");
@@ -286,8 +306,8 @@ internal static class DetailViewChecks
             Check.True(ReferenceEquals(reference.Style, button.Style), $"{name}: {label}のボタンスタイルが共通ではありません");
             if (button.Visibility == Visibility.Visible)
             {
-                Check.Equal(86d, button.ActualWidth, $"{name}: {label}のボタンを共通幅で配置できません");
-                Check.Equal(22d, button.ActualHeight, $"{name}: {label}のボタンを共通高さで配置できません");
+                Check.Equal(76d, button.ActualWidth, $"{name}: {label}のボタンを共通幅で配置できません");
+                Check.Equal(16d, button.ActualHeight, $"{name}: {label}のボタンを共通高さで配置できません");
             }
         }
     }
