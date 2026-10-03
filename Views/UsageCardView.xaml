@@ -100,11 +100,12 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,3,0">
                         <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource ServiceLogoTemplate}"
-                                          Width="18" Height="18" Margin="0,0,5,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding DisplayName}" FontWeight="Bold" FontSize="13" Foreground="#F3F4F6"/>
-                    </StackPanel>
+                                          Width="18" Height="18" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding DisplayName}" ToolTip="{Binding DisplayName}" FontWeight="Bold" FontSize="12" Foreground="#F3F4F6"
+                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                     </StackPanel>
 
                     <!-- CLIバッジ -->
                     <Border Grid.Column="1" 
@@ -120,7 +121,8 @@
 
                 <!-- 中央部: 利用制限表示 -->
                 <Grid Grid.Row="1" VerticalAlignment="Center" Margin="0,2">
-                    <!-- パターンA: 2重制限表示 (5時間制限 ＋ 週次制限の両方がある場合) -->
+                    <!-- パターンA: 2重制限表示 (5時間制限 ＋ 週次制限の両方がある場合)
+                         Gemini カードでは下部の切替ボタンにより Card*Limit が外部モデル枠に切り替わる -->
                     <StackPanel Visibility="{Binding SecondaryLimit, Converter={StaticResource NullToVisibilityConverter}}" 
                                 VerticalAlignment="Center">
                         <!-- 1段目: 5時間制限 -->
@@ -131,17 +133,17 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding PrimaryLimit.Title}" FontSize="10" FontWeight="SemiBold" Foreground="#E5E7EB"/>
-                                <TextBlock Text="{Binding PrimaryLimit.ResetTimeText}" FontSize="9" FontWeight="Medium" Foreground="#CBD5E1" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Text="{Binding CardPrimaryLimit.Title}" FontSize="10" FontWeight="SemiBold" Foreground="#E5E7EB" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Text="{Binding CardPrimaryLimit.ResetTimeText}" FontSize="9" FontWeight="Medium" Foreground="#CBD5E1" TextTrimming="CharacterEllipsis"/>
                             </StackPanel>
                             <TextBlock Grid.Column="1" 
-                                       Text="{Binding PrimaryLimit.DisplayPercentString}" 
+                                       Text="{Binding CardPrimaryLimit.DisplayPercentString}" 
                                        FontSize="11" FontWeight="Bold" Foreground="#F3F4F6" 
                                        VerticalAlignment="Center" Margin="2,0,4,0"/>
                             <Grid Grid.Column="2" Width="22" Height="22" VerticalAlignment="Center">
                                 <controls:CircularProgressBar 
-                                    Percentage="{Binding PrimaryLimit.RemainingPercent}"
-                                    ProgressBrush="{Binding PrimaryLimit.RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
+                                    Percentage="{Binding CardPrimaryLimit.RemainingPercent}"
+                                    ProgressBrush="{Binding CardPrimaryLimit.RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
                                     StrokeThickness="2.5"/>
                             </Grid>
                         </Grid>
@@ -157,17 +159,17 @@
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding SecondaryLimit.Title}" FontSize="10" FontWeight="SemiBold" Foreground="#E5E7EB"/>
-                                <TextBlock Text="{Binding SecondaryLimit.ResetTimeText}" FontSize="9" FontWeight="Medium" Foreground="#CBD5E1" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Text="{Binding CardSecondaryLimit.Title}" FontSize="10" FontWeight="SemiBold" Foreground="#E5E7EB" TextTrimming="CharacterEllipsis"/>
+                                <TextBlock Text="{Binding CardSecondaryLimit.ResetTimeText}" FontSize="9" FontWeight="Medium" Foreground="#CBD5E1" TextTrimming="CharacterEllipsis"/>
                             </StackPanel>
                             <TextBlock Grid.Column="1" 
-                                       Text="{Binding SecondaryLimit.DisplayPercentString}" 
+                                       Text="{Binding CardSecondaryLimit.DisplayPercentString}" 
                                        FontSize="11" FontWeight="Bold" Foreground="#F3F4F6" 
                                        VerticalAlignment="Center" Margin="2,0,4,0"/>
                             <Grid Grid.Column="2" Width="22" Height="22" VerticalAlignment="Center">
                                 <controls:CircularProgressBar 
-                                    Percentage="{Binding SecondaryLimit.RemainingPercent}"
-                                    ProgressBrush="{Binding SecondaryLimit.RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
+                                    Percentage="{Binding CardSecondaryLimit.RemainingPercent}"
+                                    ProgressBrush="{Binding CardSecondaryLimit.RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
                                     StrokeThickness="2.5"/>
                             </Grid>
                         </Grid>
@@ -223,15 +225,70 @@
                             CommandParameter="{Binding}"
                             ToolTip="左に移動"/>
 
-                    <!-- リセット権がない場合: 通常の 詳細表示 ↗ -->
+                    <!-- リセット権も外部モデル枠もない場合: 通常の 詳細表示 ↗ -->
                     <TextBlock Grid.Column="1" 
                                Text="詳細表示 ↗" 
                                FontSize="9" 
                                Foreground="#10B981" 
                                HorizontalAlignment="Center" 
                                VerticalAlignment="Center" 
-                               Opacity="0.8"
-                               Visibility="{Binding HasResetCredits, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=Inverse}"/>
+                               Opacity="0.8">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="{Binding HasResetCredits, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=Inverse}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasExternalLimits}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <!-- 外部モデル枠がある場合 (Gemini): [Gemini ⇄] 切替ピル + 詳細 ↗
+                         ToggleButton は ButtonBase 派生のため、押してもカードの詳細表示・ドラッグは発生しない -->
+                    <StackPanel Grid.Column="1" 
+                                Orientation="Horizontal" 
+                                HorizontalAlignment="Center" 
+                                VerticalAlignment="Center"
+                                Visibility="{Binding HasExternalLimits, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <ToggleButton IsChecked="{Binding IsShowingExternal, Mode=TwoWay}"
+                                      Cursor="Hand"
+                                      Margin="0,0,4,0"
+                                      ToolTip="Gemini と外部モデル (Claude / GPT) の表示を切替">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="ToggleButton">
+                                    <Border x:Name="Pill"
+                                            Background="#1E3A5F" 
+                                            BorderBrush="#74AFFF" 
+                                            BorderThickness="0.8" 
+                                            CornerRadius="3" 
+                                            Padding="4,0.5">
+                                        <TextBlock x:Name="PillText"
+                                                   Text="{Binding CardModeLabel, StringFormat='{}{0} ⇄'}" 
+                                                   FontSize="8.5" 
+                                                   FontWeight="Bold" 
+                                                   Foreground="#BFDBFE"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsChecked" Value="True">
+                                            <Setter TargetName="Pill" Property="Background" Value="#4A2E1C"/>
+                                            <Setter TargetName="Pill" Property="BorderBrush" Value="#DE8B59"/>
+                                            <Setter TargetName="PillText" Property="Foreground" Value="#FCD9BD"/>
+                                        </Trigger>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Pill" Property="Opacity" Value="0.85"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                        </ToggleButton>
+                        <TextBlock Text="詳細 ↗" 
+                                   FontSize="9" 
+                                   Foreground="#10B981" 
+                                   VerticalAlignment="Center" 
+                                   Opacity="0.85"/>
+                    </StackPanel>
 
                     <!-- リセット権がある場合: [🎟️ 3件] ピルバッジ + 詳細 ↗ -->
                     <StackPanel Grid.Column="1" 

@@ -26,6 +26,10 @@ public class AiUsageItem : ViewModelBase
     private bool _isRecoveredGlowActive;
     private double? _prevPrimaryPercent;
     private double? _prevSecondaryPercent;
+    private UsageLimitInfo? _externalFiveHourLimit;
+    private UsageLimitInfo? _externalWeeklyLimit;
+    private bool _hasExternalLimits;
+    private bool _isShowingExternal;
 
     public AiUsageItem()
     {
@@ -166,19 +170,91 @@ public class AiUsageItem : ViewModelBase
     public UsageLimitInfo PrimaryLimit
     {
         get => _primaryLimit;
-        set => SetProperty(ref _primaryLimit, value);
+        set
+        {
+            if (SetProperty(ref _primaryLimit, value)) OnPropertyChanged(nameof(CardPrimaryLimit));
+        }
     }
 
     public UsageLimitInfo? SecondaryLimit
     {
         get => _secondaryLimit;
-        set => SetProperty(ref _secondaryLimit, value);
+        set
+        {
+            if (SetProperty(ref _secondaryLimit, value)) OnPropertyChanged(nameof(CardSecondaryLimit));
+        }
     }
 
     public ObservableCollection<UsageLimitInfo> AllLimits
     {
         get => _allLimits;
         set => SetProperty(ref _allLimits, value);
+    }
+
+    /// <summary>
+    /// 外部モデル(Claude / GPT)の5時間制限。Geminiカードの切替表示で使用する。
+    /// </summary>
+    public UsageLimitInfo? ExternalFiveHourLimit
+    {
+        get => _externalFiveHourLimit;
+        set
+        {
+            if (SetProperty(ref _externalFiveHourLimit, value)) NotifyCardLimitsChanged();
+        }
+    }
+
+    /// <summary>
+    /// 外部モデル(Claude / GPT)の週次制限。Geminiカードの切替表示で使用する。
+    /// </summary>
+    public UsageLimitInfo? ExternalWeeklyLimit
+    {
+        get => _externalWeeklyLimit;
+        set
+        {
+            if (SetProperty(ref _externalWeeklyLimit, value)) NotifyCardLimitsChanged();
+        }
+    }
+
+    /// <summary>
+    /// 外部モデル枠(5時間＋週次)が揃っており、カード上で切替ボタンを出せるか。
+    /// </summary>
+    public bool HasExternalLimits
+    {
+        get => _hasExternalLimits;
+        set
+        {
+            if (SetProperty(ref _hasExternalLimits, value)) NotifyCardLimitsChanged();
+        }
+    }
+
+    /// <summary>
+    /// カードに外部モデル枠を表示中か (false = Gemini枠、既定)。切替ボタンと双方向バインドする。
+    /// </summary>
+    public bool IsShowingExternal
+    {
+        get => _isShowingExternal;
+        set
+        {
+            if (SetProperty(ref _isShowingExternal, value)) NotifyCardLimitsChanged();
+        }
+    }
+
+    private bool UseExternalOnCard => IsShowingExternal && HasExternalLimits;
+
+    /// <summary>カード上段に表示する制限 (切替状態に応じて Gemini / 外部モデル)</summary>
+    public UsageLimitInfo CardPrimaryLimit => UseExternalOnCard ? ExternalFiveHourLimit! : PrimaryLimit;
+
+    /// <summary>カード下段に表示する制限 (切替状態に応じて Gemini / 外部モデル)</summary>
+    public UsageLimitInfo? CardSecondaryLimit => UseExternalOnCard ? ExternalWeeklyLimit : SecondaryLimit;
+
+    /// <summary>切替ボタンに表示する現在の表示対象</summary>
+    public string CardModeLabel => UseExternalOnCard ? "外部" : "Gemini";
+
+    private void NotifyCardLimitsChanged()
+    {
+        OnPropertyChanged(nameof(CardPrimaryLimit));
+        OnPropertyChanged(nameof(CardSecondaryLimit));
+        OnPropertyChanged(nameof(CardModeLabel));
     }
 
     /// <summary>

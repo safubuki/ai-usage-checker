@@ -76,7 +76,7 @@ public static class InitialCatalogFactory
             new()
             {
                 ServiceType = AiServiceType.Gemini,
-                DisplayName = "Gemini",
+                DisplayName = "Antigravity",
                 SubTitle = "Google DeepMind",
                 CliInfo = new CliInfo
                 {

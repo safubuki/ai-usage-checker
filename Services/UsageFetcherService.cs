@@ -586,7 +586,7 @@ public class UsageFetcherService
 
     private void ApplyGeminiQuota(AiUsageItem item, List<QuotaGroup>? groups)
     {
-        item.DisplayName = "Gemini";
+        item.DisplayName = "Antigravity";
         item.SubTitle = "Google DeepMind";
 
         var geminiGroup = groups?.FirstOrDefault(g => g.DisplayName.Contains("Gemini", StringComparison.OrdinalIgnoreCase));
@@ -636,6 +636,10 @@ public class UsageFetcherService
             item.AllLimits.Add(item.PrimaryLimit);
             if (item.SecondaryLimit != null) item.AllLimits.Add(item.SecondaryLimit);
 
+            item.ExternalFiveHourLimit = null;
+            item.ExternalWeeklyLimit = null;
+            item.HasExternalLimits = false;
+
             // 外部モデル枠 (Claude / GPT models) があれば詳細画面の内訳枠として追加
             var thirdPartyGroup = groups?.FirstOrDefault(g => 
                 g.DisplayName.Contains("Claude", StringComparison.OrdinalIgnoreCase) || 
@@ -649,29 +653,42 @@ public class UsageFetcherService
 
                 if (tp5h != null)
                 {
-                    item.AllLimits.Add(new UsageLimitInfo
+                    var limit = new UsageLimitInfo
                     {
-                        Title = "外部モデル 5時間制限",
+                        Title = "5時間制限 外部",
                         LimitDescription = "Claude / GPT models 5h limit",
                         RemainingPercent = tp5h.RemainingFraction * 100.0,
                         ResetTimeText = FormatResetTime(tp5h.ResetTime, "リセット")
-                    });
+                    };
+                    item.AllLimits.Add(limit);
+                    item.ExternalFiveHourLimit = limit;
                 }
                 if (tpWeekly != null)
                 {
-                    item.AllLimits.Add(new UsageLimitInfo
+                    var limit = new UsageLimitInfo
                     {
-                        Title = "外部モデル 週次制限",
+                        Title = "週次制限 外部",
                         LimitDescription = "Claude / GPT models Weekly limit",
                         RemainingPercent = tpWeekly.RemainingFraction * 100.0,
                         ResetTimeText = FormatResetTime(tpWeekly.ResetTime, "リセット")
-                    });
+                    };
+                    item.AllLimits.Add(limit);
+                    item.ExternalWeeklyLimit = limit;
                 }
+
+                // カード上の4枠表示: Gemini 5時間/週次 と 外部 5時間/週次 が揃っている場合のみ
+                item.HasExternalLimits = item.SecondaryLimit != null
+                    && item.ExternalFiveHourLimit != null
+                    && item.ExternalWeeklyLimit != null;
             }
         }
         else
         {
             // 言語サーバー未接続または未ログイン時（偽のハードコードフォールバックを撤廃）
+            item.ExternalFiveHourLimit = null;
+            item.ExternalWeeklyLimit = null;
+            item.HasExternalLimits = false;
+
             item.PrimaryLimit.Title = "5時間制限";
             item.PrimaryLimit.LimitDescription = "Antigravity 言語サーバー接続待機中";
             item.PrimaryLimit.RemainingPercent = 0.0;
