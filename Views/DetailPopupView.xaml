@@ -116,10 +116,16 @@
                             <Grid Margin="0,0,0,4">
                                 <TextBlock Text="利用制限・Usage状況" FontSize="10.5" FontWeight="Bold" Foreground="#9CA3AF"/>
                                 <TextBlock HorizontalAlignment="Right" FontSize="9.5" Foreground="#10B981" VerticalAlignment="Center">
-                                    <Run Text="確認コマンド: " Foreground="#6B7280"/>
+                                    <Run Text="CLI確認コマンド: " Foreground="#6B7280"/>
                                     <Run Text="{Binding SelectedItem.CliInfo.UsageCheckCommand, Mode=OneWay}" FontWeight="Bold"/>
                                 </TextBlock>
                             </Grid>
+
+                            <TextBlock x:Name="UsageSourceTextBlock"
+                                       Text="{Binding SelectedItem.UsageSourceText}"
+                                       Visibility="{Binding SelectedItem.HasUsageSource, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                       FontSize="9.5" Foreground="#93C5FD" Margin="0,0,0,6"
+                                       TextWrapping="Wrap"/>
 
                             <ItemsControl ItemsSource="{Binding SelectedItem.AllLimits}">
                                 <ItemsControl.ItemTemplate>
@@ -333,13 +339,14 @@
                                 </StackPanel>
 
                                 <!-- CLI状態バッジ -->
-                                <Border Grid.Column="1" 
+                                <Border x:Name="CliStatusBadge" Grid.Column="1"
                                         Background="{Binding SelectedItem.CliInfo.StatusBadgeText, Converter={StaticResource StatusBadgeBrushConverter}}" 
                                         CornerRadius="4" 
                                         Padding="6,2" 
                                         VerticalAlignment="Center">
                                     <TextBlock Text="{Binding SelectedItem.CliInfo.StatusBadgeText}" 
                                                FontSize="9.5" FontWeight="Bold"
+                                               VerticalAlignment="Center" HorizontalAlignment="Center"
                                                Foreground="{Binding SelectedItem.CliInfo.StatusBadgeText, Converter={StaticResource StatusBadgeTextBrushConverter}}"/>
                                 </Border>
                             </Grid>
@@ -407,7 +414,7 @@
                         </Grid>
                     </Border>
 
-                    <!-- 2-3. CLI実行ログコンソール (しっかり縦幅115pxを確保して見やすく) -->
+                    <!-- 2-3. 取得・CLI操作ログコンソール (しっかり縦幅115pxを確保して見やすく) -->
                     <Border Background="#0A0E0D" BorderBrush="#1B2623" BorderThickness="1" CornerRadius="6" Padding="8,6" Margin="0,0,0,8" Height="115">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -415,7 +422,7 @@
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
                             <Grid Grid.Row="0" Margin="0,0,0,4">
-                                <TextBlock Text="CLI実行ログ" FontSize="9.5" FontWeight="Bold" Foreground="#9CA3AF" VerticalAlignment="Center"/>
+                                <TextBlock Text="取得・CLI操作ログ" FontSize="9.5" FontWeight="Bold" Foreground="#9CA3AF" VerticalAlignment="Center"/>
 
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding VisibleErrorCount, StringFormat='エラー {0}件'}"

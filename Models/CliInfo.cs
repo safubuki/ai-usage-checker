@@ -12,6 +12,7 @@ public class CliInfo : ViewModelBase
     private string _latestVersion = "";
     private bool _hasUpdate;
     private bool _isBusy = true;
+    private bool _isUpdating;
     private string _statusMessage = "";
     private string _executablePath = "";
     private string _usageCheckCommand = "";
@@ -130,6 +131,16 @@ public class CliInfo : ViewModelBase
         }
     }
 
+    public bool IsUpdating
+    {
+        get => _isUpdating;
+        set
+        {
+            if (SetProperty(ref _isUpdating, value))
+                OnPropertyChanged(nameof(StatusBadgeText));
+        }
+    }
+
     public string StatusMessage
     {
         get => _statusMessage;
@@ -148,12 +159,13 @@ public class CliInfo : ViewModelBase
     {
         get
         {
+            if (IsUpdating) return "更新中...";
             if (IsBusy) return "確認中...";
             if (!IsInstalled) return "未導入";
             if (!IsLoggedIn) return "要ログイン";
             if (HasUsageError) return "取得エラー";
-            if (!IsSubscribed) return "未契約";
             if (HasUpdate) return "更新あり";
+            if (!IsSubscribed) return "未契約";
             return "最新";
         }
     }

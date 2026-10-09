@@ -2,7 +2,10 @@ using AIUsageChecker.RegressionTests;
 
 var tests = UsageFetcherRecoveryTests.GetCases().Concat(GrokQuotaClientTests.GetCases())
     .Concat(ClaudeQuotaClientTests.GetCases())
+    .Concat(AntigravityQuotaSourceTests.GetCases())
     .Concat(CardDragDropTests.GetCases())
+    .Concat(CliUpdateNotificationTests.GetCases())
+    .Concat(ResetTimeTests.GetCases())
     .Append(new TestCase("詳細画面とカードドラッグの操作・配置", () =>
     {
         DetailViewChecks.Run();

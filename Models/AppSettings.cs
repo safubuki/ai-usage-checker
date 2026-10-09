@@ -20,4 +20,5 @@ public class AppSettings
     public bool IsAlwaysOnTop { get; set; } = true;
     public int AutoRefreshMinutes { get; set; } = 5;
     public bool IsDocked { get; set; } = false;
+    public HashSet<string> AnnouncedCliUpdates { get; set; } = new();
 }

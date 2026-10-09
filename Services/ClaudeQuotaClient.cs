@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -59,6 +58,7 @@ public class ClaudeQuotaClient
             var jsonText = await File.ReadAllTextAsync(configFilePath);
             using var doc = JsonDocument.Parse(jsonText);
             var root = doc.RootElement;
+            var localNow = DateTime.Now;
 
             // 1. アカウントおよび契約状態の判定
             if (root.ValueKind != JsonValueKind.Object ||
@@ -102,7 +102,7 @@ public class ClaudeQuotaClient
 
                         if (fhElem.TryGetProperty("resets_at", out var rAt) && rAt.ValueKind == JsonValueKind.String)
                         {
-                            result.FiveHourResetText = FormatIsoResetTime(rAt.GetString());
+                            result.FiveHourResetText = ResetTimeFormatter.Format(rAt.GetString(), localNow);
                         }
                     }
 
@@ -115,7 +115,7 @@ public class ClaudeQuotaClient
 
                         if (sdElem.TryGetProperty("resets_at", out var rAt) && rAt.ValueKind == JsonValueKind.String)
                         {
-                            result.WeeklyResetText = FormatIsoResetTime(rAt.GetString());
+                            result.WeeklyResetText = ResetTimeFormatter.Format(rAt.GetString(), localNow);
                         }
                     }
                 }
@@ -149,48 +149,5 @@ public class ClaudeQuotaClient
             result.StatusMessage = "未契約";
             return result;
         }
-    }
-
-    private string FormatIsoResetTime(string? isoTime)
-    {
-        if (string.IsNullOrWhiteSpace(isoTime)) return "常時更新";
-
-        // 1. ISO 8601 等の日時文字列を解析
-        if (DateTime.TryParse(isoTime, null, DateTimeStyles.AdjustToUniversal, out var dtUtc))
-        {
-            var dtLocal = dtUtc.ToLocalTime();
-            var diff = dtLocal - DateTime.Now;
-
-            // 24時間を超える場合 (週次制限など) は月日+時分、24時間以内 (5時間制限など) は時分のみでGPT・Geminiと統一
-            if (diff.TotalHours > 24)
-            {
-                return $"{dtLocal:MM/dd HH:mm} リセット";
-            }
-            return $"{dtLocal:HH:mm} リセット";
-        }
-
-        // 2. 「あと 4時間23分」「あと 30分」などの相対時間文字列から現在時刻を元にリセット時刻を逆算
-        var matchHoursMins = System.Text.RegularExpressions.Regex.Match(isoTime, @"あと\s*(?:(\d+)\s*時間)?\s*(\d+)\s*分");
-        if (matchHoursMins.Success)
-        {
-            int hours = 0;
-            if (!string.IsNullOrEmpty(matchHoursMins.Groups[1].Value))
-            {
-                int.TryParse(matchHoursMins.Groups[1].Value, out hours);
-            }
-            int.TryParse(matchHoursMins.Groups[2].Value, out int mins);
-
-            var targetTime = DateTime.Now.AddHours(hours).AddMinutes(mins);
-            return $"{targetTime:HH:mm} リセット";
-        }
-
-        var matchHoursOnly = System.Text.RegularExpressions.Regex.Match(isoTime, @"あと\s*(\d+)\s*時間");
-        if (matchHoursOnly.Success && int.TryParse(matchHoursOnly.Groups[1].Value, out int h))
-        {
-            var targetTime = DateTime.Now.AddHours(h);
-            return $"{targetTime:HH:mm} リセット";
-        }
-
-        return isoTime ?? "";
     }
 }

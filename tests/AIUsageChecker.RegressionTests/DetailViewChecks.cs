@@ -85,6 +85,7 @@ internal static class DetailViewChecks
             var context = new DetailTestContext(item);
             view.DataContext = context;
             Arrange(view);
+            AssertUsageSourceControls(view, item, commandName, name);
 
             var buttons = Descendants<Button>(view).ToArray();
             var login = buttons.Single(button => ReferenceEquals(button.Command, context.LoginCliCommand));
@@ -202,6 +203,8 @@ internal static class DetailViewChecks
 
         // 同じ STA と安全に読み込んだ共有 Resources をカード操作の検証でも使う。
         CardDragDropTests.RunOnStaThread();
+        CliUpdateNotificationTests.RunOnStaThread();
+        ResetTimeTests.RunOnStaThread();
         Check.True(Application.Current?.Windows.Count == 0,
             "カード操作の検証で実アプリのウィンドウを起動しないでください");
     }
@@ -244,7 +247,7 @@ internal static class DetailViewChecks
                 HasUsageError = false,
                 HasUpdate = true,
                 InstalledVersion = "1.0.0",
-                UsageCheckCommand = "/usage",
+                UsageCheckCommand = commandName == "agy" ? "agy -p \"/usage\"" : "/usage",
                 StatusMessage = "連携済み。利用枠を取得しました。"
             },
             PrimaryLimit = new UsageLimitInfo
@@ -281,6 +284,52 @@ internal static class DetailViewChecks
             Check.True(button.ActualWidth <= parent.ActualWidth + 0.5,
                 $"{name}: ボタン幅 {button.ActualWidth:F1} が親の幅 {parent.ActualWidth:F1} を超えています");
         }
+    }
+
+    private static void AssertUsageSourceControls(DetailPopupView view, AiUsageItem item, string commandName, string name)
+    {
+        var source = view.FindName("UsageSourceTextBlock") as TextBlock
+            ?? throw new InvalidOperationException($"{name}: 取得元のTextBlockが見つかりません。");
+        Check.Equal(Visibility.Collapsed, source.Visibility, $"{name}: 取得元がない場合は表示しないでください");
+        if (commandName != "agy") return;
+
+        var scrollViewer = (ScrollViewer)view.FindName("DetailScrollViewer");
+        scrollViewer.ScrollToTop();
+
+        // 同じ詳細画面のまま、取得元変更の通知でCLIとIDEの表示が切り替わることを検証。
+        item.UsageSourceText = "取得元：CLI";
+        Arrange(view);
+        Check.Equal(Visibility.Visible, source.Visibility, "Antigravity: CLI取得元が表示されません");
+        Check.Equal(item.UsageSourceText, source.Text, "Antigravity: CLI取得元の表示が一致しません");
+
+        item.UsageSourceText = "取得元：IDE（CLI取得失敗時の補助）";
+        Arrange(view);
+        Check.Equal(Visibility.Visible, source.Visibility, "Antigravity: IDE取得元が表示されません");
+        Check.Equal(item.UsageSourceText, source.Text, "Antigravity: IDE取得元への切り替えが反映されません");
+        Check.Equal(TextWrapping.Wrap, source.TextWrapping, "Antigravity: 長い取得元は折り返してください");
+        var ideSourceHeight = source.ActualHeight;
+        Check.True(ideSourceHeight > 0, "Antigravity: IDE取得元を配置できませんでした");
+        SaveImage(view, "detail-antigravity-ide.png");
+
+        // 失敗時の前回取得元に説明が加わっても、カード内で折り返して表示する。
+        item.CliInfo.HasUsageError = true;
+        item.UsageSourceText = "取得失敗（前回の取得元：IDE）";
+        Arrange(view);
+        Check.Equal(Visibility.Visible, source.Visibility, "Antigravity: 失敗時の前回取得元が表示されません");
+        Check.Equal(item.UsageSourceText, source.Text, "Antigravity: 失敗時の前回取得元が反映されません");
+        SaveImage(view, "detail-antigravity-ide-stale.png");
+
+        item.UsageSourceText = "取得失敗（前回の取得元：IDE）。最後に成功した取得元はIDEです。CLIとIDEの状態を確認してから、利用量を再取得してください。";
+        Arrange(view);
+        Check.True(source.ActualHeight > ideSourceHeight, "Antigravity: 長い前回取得元が折り返されていません");
+        var parent = VisualTreeHelper.GetParent(source) as FrameworkElement
+            ?? throw new InvalidOperationException("Antigravity: 取得元の親要素がありません。");
+        Check.True(source.ActualWidth <= parent.ActualWidth + 0.5,
+            "Antigravity: 取得元の表示が利用状況カードの幅を超えています");
+        item.UsageSourceText = "";
+        item.CliInfo.HasUsageError = false;
+        Arrange(view);
+        Check.Equal(Visibility.Collapsed, source.Visibility, "Antigravity: 取得元を消した後も表示が残っています");
     }
 
     private static void AssertAuthenticationState(AiUsageItem item, Button login, TextBlock hint, bool expected, string scenario)

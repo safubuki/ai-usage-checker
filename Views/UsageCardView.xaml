@@ -108,13 +108,14 @@
                      </StackPanel>
 
                     <!-- CLIバッジ -->
-                    <Border Grid.Column="1" 
+                    <Border x:Name="CliStatusBadge" Grid.Column="1" Height="16" VerticalAlignment="Center"
                             Background="{Binding CliInfo.StatusBadgeText, Converter={StaticResource StatusBadgeBrushConverter}}" 
                             CornerRadius="4" 
                             Padding="4,1">
                         <TextBlock Text="{Binding CliInfo.StatusBadgeText}" 
                                    FontSize="9" 
                                    FontWeight="SemiBold"
+                                   VerticalAlignment="Center" HorizontalAlignment="Center"
                                    Foreground="{Binding CliInfo.StatusBadgeText, Converter={StaticResource StatusBadgeTextBrushConverter}}"/>
                     </Border>
                 </Grid>

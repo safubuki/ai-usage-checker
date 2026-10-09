@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -20,6 +19,8 @@ public class UsageFetcherService
     private readonly System.Threading.SemaphoreSlim _fetchLock = new(1, 1);
     private readonly string _cacheFilePath;
     private List<QuotaGroup>? _cachedGroups;
+    private UsageDataSource _geminiQuotaSource;
+    private bool _geminiFetchAttempted;
     private CodexQuotaData? _lastCodexData;
     private CopilotQuotaData? _lastCopilotData;
     private ClaudeQuotaData? _lastClaudeData;
@@ -159,6 +160,7 @@ public class UsageFetcherService
 
         var geminiTask = serviceType is null or AiServiceType.Gemini ? Task.Run(async () =>
         {
+            _geminiFetchAttempted = true;
             try
             {
                 var groups = await FetchGeminiQuotaAsync();
@@ -253,14 +255,24 @@ public class UsageFetcherService
     protected virtual Task<ClaudeQuotaData> FetchClaudeQuotaAsync() => _claudeClient.FetchClaudeQuotaAsync();
     protected virtual Task<CopilotQuotaData?> FetchCopilotQuotaAsync() => _copilotClient.FetchCopilotQuotaAsync();
     protected virtual Task<GrokQuotaData?> FetchGrokQuotaAsync() => _grokClient.FetchGrokQuotaAsync();
+    protected virtual Task<List<QuotaGroup>?> FetchAgyQuotaAsync() => _agyClient.FetchQuotaSummaryAsync();
+    protected virtual Task<List<QuotaGroup>?> FetchIdeQuotaAsync() => _quotaClient.FetchQuotaSummaryAsync();
 
     protected virtual async Task<List<QuotaGroup>?> FetchGeminiQuotaAsync()
     {
-        var groups = await _agyClient.FetchQuotaSummaryAsync();
-        if (!HasUsableGeminiQuota(groups))
+        var groups = await FetchAgyQuotaAsync();
+        if (HasUsableGeminiQuota(groups))
         {
-            LogOutputReceived?.Invoke("[Antigravity] CLIより取得できなかったため、IDE言語サーバーをフォールバック確認します...");
-            groups = await _quotaClient.FetchQuotaSummaryAsync();
+            _geminiQuotaSource = UsageDataSource.Cli;
+            return groups;
+        }
+
+        LogOutputReceived?.Invoke("[Antigravity] CLIより取得できなかったため、IDE言語サーバーをフォールバック確認します...");
+        groups = await FetchIdeQuotaAsync();
+        if (HasUsableGeminiQuota(groups))
+        {
+            _geminiQuotaSource = UsageDataSource.Ide;
+            LogOutputReceived?.Invoke("[Antigravity] IDEから利用枠を取得しました（CLI取得失敗時の補助）。");
         }
         return groups;
     }
@@ -270,6 +282,9 @@ public class UsageFetcherService
         var groups = _cachedGroups;
         bool hasUsageError = IsUsingStaleData(item.ServiceType);
         item.CliInfo.HasUsageError = hasUsageError;
+        item.UsageSourceText = item.ServiceType == AiServiceType.Gemini
+            ? GetGeminiUsageSourceText()
+            : "";
 
         if (hasUsageError)
         {
@@ -854,6 +869,34 @@ public class UsageFetcherService
         item.AllLimits.Add(item.PrimaryLimit);
     }
 
+    private string GetGeminiUsageSourceText()
+    {
+        if (!HasUsableGeminiQuota(_cachedGroups))
+        {
+            return _geminiFetchAttempted
+                ? "取得元：未取得（CLI・IDEから取得できませんでした）"
+                : "取得元：未取得";
+        }
+
+        var source = _geminiQuotaSource switch
+        {
+            UsageDataSource.Cli => "CLI",
+            UsageDataSource.Ide => "IDE",
+            _ => "不明"
+        };
+
+        if (_geminiDataIsStale)
+        {
+            return _geminiFetchAttempted
+                ? $"取得失敗（前回の取得元：{source}）"
+                : $"取得元：{source}（前回取得データ）";
+        }
+
+        return _geminiQuotaSource == UsageDataSource.Ide
+            ? "取得元：IDE（CLI取得失敗時の補助）"
+            : $"取得元：{source}";
+    }
+
     private static bool HasUsableGeminiQuota(List<QuotaGroup>? groups)
     {
         var geminiGroup = groups?.FirstOrDefault(g =>
@@ -895,45 +938,7 @@ public class UsageFetcherService
 
     private string FormatResetTime(string isoTime, string suffix)
     {
-        if (string.IsNullOrWhiteSpace(isoTime)) return "常時更新";
-
-        // 1. ISO 8601 等の日時文字列を解析
-        if (DateTime.TryParse(isoTime, null, DateTimeStyles.AdjustToUniversal, out var dtUtc))
-        {
-            var dtLocal = dtUtc.ToLocalTime();
-            var diff = dtLocal - DateTime.Now;
-
-            // 24時間を超える場合 (週次制限など) は月日+時分、24時間以内 (5時間制限など) は時分のみでGPTと統一
-            if (diff.TotalHours > 24)
-            {
-                return $"{dtLocal:MM/dd HH:mm} {suffix}";
-            }
-            return $"{dtLocal:HH:mm} {suffix}";
-        }
-
-        // 2. 「あと 4時間23分」「あと 35分」などの相対時間文字列から現在時刻を元にリセット時刻を逆算
-        var matchHoursMins = System.Text.RegularExpressions.Regex.Match(isoTime, @"あと\s*(?:(\d+)\s*時間)?\s*(\d+)\s*分");
-        if (matchHoursMins.Success)
-        {
-            int hours = 0;
-            if (!string.IsNullOrEmpty(matchHoursMins.Groups[1].Value))
-            {
-                int.TryParse(matchHoursMins.Groups[1].Value, out hours);
-            }
-            int.TryParse(matchHoursMins.Groups[2].Value, out int mins);
-
-            var targetTime = DateTime.Now.AddHours(hours).AddMinutes(mins);
-            return $"{targetTime:HH:mm} {suffix}";
-        }
-
-        var matchHoursOnly = System.Text.RegularExpressions.Regex.Match(isoTime, @"あと\s*(\d+)\s*時間");
-        if (matchHoursOnly.Success && int.TryParse(matchHoursOnly.Groups[1].Value, out int h))
-        {
-            var targetTime = DateTime.Now.AddHours(h);
-            return $"{targetTime:HH:mm} {suffix}";
-        }
-
-        return isoTime;
+        return ResetTimeFormatter.Format(isoTime, DateTime.Now, suffix);
     }
 
     private void LoadCache()
@@ -964,6 +969,9 @@ public class UsageFetcherService
                         {
                             _geminiDataIsStale = true;
                             _geminiLastSuccessAt = cache.GeminiFetchedAt ?? fallbackTimestamp;
+                            _geminiQuotaSource = cache.GeminiQuotaSource is UsageDataSource.Cli or UsageDataSource.Ide
+                                ? cache.GeminiQuotaSource
+                                : UsageDataSource.Unknown;
                         }
                         if (cache.CodexData?.IsSuccess == true)
                         {
@@ -1005,6 +1013,7 @@ public class UsageFetcherService
             var cache = new AllQuotaCache
             {
                 GeminiGroups = _cachedGroups,
+                GeminiQuotaSource = _geminiQuotaSource,
                 CodexData = _lastCodexData?.IsSuccess == true ? _lastCodexData : null,
                 ClaudeData = _lastClaudeData?.IsSubscribed == true ? _lastClaudeData : null,
                 GrokData = _lastGrokData?.IsSuccess == true ? _lastGrokData : null,
@@ -1030,6 +1039,7 @@ public class UsageFetcherService
 public class AllQuotaCache
 {
     public List<QuotaGroup>? GeminiGroups { get; set; }
+    public UsageDataSource GeminiQuotaSource { get; set; }
     public CodexQuotaData? CodexData { get; set; }
     public ClaudeQuotaData? ClaudeData { get; set; }
     public GrokQuotaData? GrokData { get; set; }

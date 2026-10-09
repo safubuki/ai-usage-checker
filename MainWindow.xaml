@@ -14,6 +14,9 @@
         Background="Transparent"
         Topmost="{Binding IsAlwaysOnTop}"
         WindowStartupLocation="Manual">
+    <Window.InputBindings>
+        <KeyBinding Key="U" Modifiers="Control+Shift" Command="{Binding ShowCliUpdateNotificationCommand}"/>
+    </Window.InputBindings>
     <Window.Resources>
         <converters:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
     </Window.Resources>
@@ -68,13 +71,19 @@
                     <!-- 右側操作ボタン群 (更新, ピン留め, サイド表示, 最小化, 閉じる) -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                         <!-- 1. 更新ボタン (大切なボタンとして「更新」テキスト入り) -->
-                        <Button ToolTip="全ての利用状況とCLI状態を更新" 
+                        <Button x:Name="RefreshAllButton" ToolTip="全ての利用状況とCLI状態を更新（右クリックでCLI更新通知を再表示）"
                                 Padding="6,2" Margin="0,0,4,0"
                                 FontSize="10" FontWeight="SemiBold"
                                 Background="#1A2722" Foreground="#34D399" 
                                 BorderBrush="#24513E" BorderThickness="1"
                                 Command="{Binding RefreshAllCommand}"
                                 Cursor="Hand" FocusVisualStyle="{x:Null}">
+                            <Button.ContextMenu>
+                                <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                    <MenuItem Header="CLI更新通知を再表示" InputGestureText="Ctrl+Shift+U"
+                                              Command="{Binding ShowCliUpdateNotificationCommand}"/>
+                                </ContextMenu>
+                            </Button.ContextMenu>
                             <!-- 起動時の自動更新で無効になっても、標準テーマの白い背景を出さない。 -->
                             <Button.Template>
                                 <ControlTemplate TargetType="Button">
@@ -218,6 +227,35 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </AdornerDecorator>
+
+                <!-- 更新バッジを隠さず、カード一覧の中央より少し上に重ねるCLI更新通知 -->
+                <views:CliUpdateNoticeView x:Name="CliUpdateNotice" Grid.Row="1"
+                                           DataContext="{Binding CliUpdates}"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Panel.ZIndex="10">
+                    <views:CliUpdateNoticeView.RenderTransform>
+                        <TranslateTransform Y="-32"/>
+                    </views:CliUpdateNoticeView.RenderTransform>
+                    <views:CliUpdateNoticeView.Style>
+                        <Style TargetType="views:CliUpdateNoticeView">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsOpen}" Value="True">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding DataContext.IsDetailOpen, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding DataContext.IsStartupLoading, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Visibility, ElementName=StartupLoadingOverlay}" Value="Visible">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </views:CliUpdateNoticeView.Style>
+                </views:CliUpdateNoticeView>
 
                 <!-- 3. 詳細ポップアップ (半透明バックドロップ + モーダルオーバーレイ) -->
                 <Grid Grid.Row="0" Grid.RowSpan="2" 

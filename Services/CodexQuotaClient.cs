@@ -50,12 +50,15 @@ public class CodexQuotaClient
         return File.Exists(GetAuthFilePath());
     }
 
-    public async Task<CodexQuotaData?> FetchCodexQuotaAsync()
+    public Task<CodexQuotaData?> FetchCodexQuotaAsync()
+    {
+        return FetchCodexQuotaAsync(GetAuthFilePath());
+    }
+
+    internal async Task<CodexQuotaData?> FetchCodexQuotaAsync(string authFile)
     {
         try
         {
-            var authFile = GetAuthFilePath();
-
             if (!File.Exists(authFile))
             {
                 LogOutputReceived?.Invoke("[Codex] auth.json が見つかりません。'codex login' を実行してください。");
@@ -112,6 +115,7 @@ public class CodexQuotaClient
             var root = doc.RootElement;
 
             var result = new CodexQuotaData { IsSuccess = true };
+            var localNow = DateTime.Now;
 
             if (root.TryGetProperty("plan_type", out var planElem))
             {
@@ -132,7 +136,7 @@ public class CodexQuotaClient
                     if (pwElem.TryGetProperty("reset_at", out var rAt))
                     {
                         var dt = DateTimeOffset.FromUnixTimeSeconds(rAt.GetInt64()).LocalDateTime;
-                        resetText = windowSec <= 21600 ? $"{dt:HH:mm} リセット" : $"{dt:MM/dd HH:mm} リセット";
+                        resetText = ResetTimeFormatter.Format(dt, localNow, alwaysShowDate: windowSec > 21600);
                         if (remaining <= 0.0) resetText += " (枯渇)";
                     }
 
@@ -162,7 +166,7 @@ public class CodexQuotaClient
                     if (swElem.TryGetProperty("reset_at", out var rAt))
                     {
                         var dt = DateTimeOffset.FromUnixTimeSeconds(rAt.GetInt64()).LocalDateTime;
-                        resetText = $"{dt:MM/dd HH:mm} リセット";
+                        resetText = ResetTimeFormatter.Format(dt, localNow, alwaysShowDate: true);
                     }
 
                     result.HasWeeklyLimit = true;
@@ -186,7 +190,7 @@ public class CodexQuotaClient
                             if (subPw.TryGetProperty("reset_at", out var rAt))
                             {
                                 var dt = DateTimeOffset.FromUnixTimeSeconds(rAt.GetInt64()).LocalDateTime;
-                                result.ReserveResetText = $"{dt:MM/dd HH:mm} リセット";
+                                result.ReserveResetText = ResetTimeFormatter.Format(dt, localNow, alwaysShowDate: true);
                             }
                         }
                     }

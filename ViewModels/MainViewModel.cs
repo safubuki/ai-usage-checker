@@ -106,6 +106,7 @@ public class MainViewModel : ViewModelBase
     }
 
     public AppSettings Settings => _settings;
+    public CliUpdateNotificationViewModel CliUpdates { get; }
 
     public void SaveDockedTop(double top)
     {
@@ -142,6 +143,7 @@ public class MainViewModel : ViewModelBase
 
     // コマンド
     public RelayCommand RefreshAllCommand { get; }
+    public RelayCommand ShowCliUpdateNotificationCommand { get; }
     public RelayCommand<AiUsageItem> SelectItemCommand { get; }
     public RelayCommand CloseDetailCommand { get; }
     public RelayCommand<AiUsageItem> InstallCliCommand { get; }
@@ -170,9 +172,19 @@ public class MainViewModel : ViewModelBase
         _isAlwaysOnTop = _settings.IsAlwaysOnTop;
         _isDocked = false; // 起動時は常にメイン画面を表示
 
+        CliUpdates = new CliUpdateNotificationViewModel(_settings,
+            () => _settingsService.SaveSettings(_settings), UpdateCliAndRefreshUsageAsync,
+            () => !IsRefreshing && !_isItemOperationRunning, text => StatusText = text);
+
         // コマンド初期化
         RefreshAllCommand = new RelayCommand(async () => await RefreshAllAsync(),
-            () => !IsRefreshing && !_isItemOperationRunning);
+            () => !IsRefreshing && !_isItemOperationRunning && !CliUpdates.IsUpdating);
+        ShowCliUpdateNotificationCommand = new RelayCommand(() =>
+        {
+            CloseDetail();
+            CliUpdates.ShowAgain(Items);
+        }, () => !IsStartupLoading && !IsDocked && !IsRefreshing && !_isItemOperationRunning &&
+            !CliUpdates.IsUpdating && CliUpdateNotificationViewModel.HasAvailableUpdates(Items));
         SelectItemCommand = new RelayCommand<AiUsageItem>(item =>
         {
             if (item != null)
@@ -404,7 +416,7 @@ public class MainViewModel : ViewModelBase
 
     public async Task RefreshAllAsync(bool isSilent = false, bool checkCliStatus = true)
     {
-        if (IsRefreshing || _isItemOperationRunning) return;
+        if (IsRefreshing || _isItemOperationRunning || CliUpdates.IsUpdating) return;
         IsRefreshing = true;
         System.Windows.Input.CommandManager.InvalidateRequerySuggested();
 
@@ -486,12 +498,32 @@ public class MainViewModel : ViewModelBase
         finally
         {
             IsRefreshing = false;
+            CliUpdates.Refresh(Items);
             System.Windows.Input.CommandManager.InvalidateRequerySuggested();
         }
     }
 
     private bool CanRunItemOperation(AiUsageItem? item) =>
-        item != null && !IsRefreshing && !_isItemOperationRunning && !item.CliInfo.IsBusy;
+        item != null && !IsRefreshing && !_isItemOperationRunning && !CliUpdates.IsUpdating && !item.CliInfo.IsBusy;
+
+    private async Task<bool> UpdateCliAndRefreshUsageAsync(AiUsageItem item)
+    {
+        var succeeded = await _cliManager.UpdateCliAsync(item.CliInfo);
+        if (succeeded)
+        {
+            // 利用量の再取得に失敗しても、完了したCLI更新自体は成功として扱う。
+            try
+            {
+                item.CliInfo.IsBusy = true;
+                await _usageFetcher.FetchUsageAsync(item);
+            }
+            catch (Exception ex)
+            {
+                AddLog($"[{item.CliInfo.Name}] 更新後の利用量取得失敗: {ex.Message}");
+            }
+        }
+        return succeeded;
+    }
 
     private async Task RunItemOperationAsync(AiUsageItem? item, Func<AiUsageItem, Task> operation)
     {
@@ -513,6 +545,7 @@ public class MainViewModel : ViewModelBase
         {
             current.CliInfo.IsBusy = false;
             _isItemOperationRunning = false;
+            CliUpdates.Refresh(Items);
             System.Windows.Input.CommandManager.InvalidateRequerySuggested();
         }
     }

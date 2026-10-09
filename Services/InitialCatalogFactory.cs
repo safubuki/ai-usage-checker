@@ -78,6 +78,7 @@ public static class InitialCatalogFactory
                 ServiceType = AiServiceType.Gemini,
                 DisplayName = "Antigravity",
                 SubTitle = "Google DeepMind",
+                UsageSourceText = "取得元：未取得",
                 CliInfo = new CliInfo
                 {
                     Name = "Gemini (agy)",

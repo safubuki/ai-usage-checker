@@ -8,6 +8,7 @@ public class AiUsageItem : ViewModelBase
     private AiServiceType _serviceType;
     private string _displayName = "";
     private string _subTitle = "";
+    private string _usageSourceText = "";
     private CliInfo _cliInfo = new();
     private UsageLimitInfo _primaryLimit = new();
     private UsageLimitInfo? _secondaryLimit;
@@ -160,6 +161,17 @@ public class AiUsageItem : ViewModelBase
         get => _subTitle;
         set => SetProperty(ref _subTitle, value);
     }
+
+    public string UsageSourceText
+    {
+        get => _usageSourceText;
+        set
+        {
+            if (SetProperty(ref _usageSourceText, value)) OnPropertyChanged(nameof(HasUsageSource));
+        }
+    }
+
+    public bool HasUsageSource => !string.IsNullOrEmpty(UsageSourceText);
 
     public CliInfo CliInfo
     {
