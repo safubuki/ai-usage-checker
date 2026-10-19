@@ -113,7 +113,36 @@
                     <!-- 2-1. 利用状況カード (1枠・2枠・3枠柔軟に対応) -->
                     <Border Background="#141817" BorderBrush="#2D3834" BorderThickness="1" CornerRadius="8" Padding="10,6" Margin="0,0,0,8">
                         <StackPanel>
-                            <Grid Margin="0,0,0,4">
+                            <StackPanel.Resources>
+                                <DataTemplate x:Key="UsageLimitRowTemplate">
+                                    <Grid Margin="0,1,0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,0">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold" Foreground="#E5E7EB" Margin="0,0,6,0"/>
+                                                <TextBlock Text="{Binding ResetTimeText}" FontSize="9" Foreground="#9CA3AF" VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding LimitDescription}" FontSize="9" Foreground="#6B7280" TextTrimming="CharacterEllipsis"/>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" 
+                                                   Text="{Binding DisplayPercentString}" 
+                                                   FontSize="12" FontWeight="Bold" Foreground="#F3F4F6" 
+                                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <Grid Grid.Column="2" Width="26" Height="26" VerticalAlignment="Center">
+                                            <controls:CircularProgressBar 
+                                                Percentage="{Binding RemainingPercent}"
+                                                ProgressBrush="{Binding RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
+                                                StrokeThickness="3"/>
+                                        </Grid>
+                                    </Grid>
+                                </DataTemplate>
+                            </StackPanel.Resources>
+
+                            <Grid Margin="0,0,0,3">
                                 <TextBlock Text="利用制限・Usage状況" FontSize="10.5" FontWeight="Bold" Foreground="#9CA3AF"/>
                                 <TextBlock HorizontalAlignment="Right" FontSize="9.5" Foreground="#10B981" VerticalAlignment="Center">
                                     <Run Text="CLI確認コマンド: " Foreground="#6B7280"/>
@@ -124,38 +153,50 @@
                             <TextBlock x:Name="UsageSourceTextBlock"
                                        Text="{Binding SelectedItem.UsageSourceText}"
                                        Visibility="{Binding SelectedItem.HasUsageSource, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                       FontSize="9.5" Foreground="#93C5FD" Margin="0,0,0,6"
+                                       FontSize="9.5" Foreground="#93C5FD" Margin="0,0,0,4"
                                        TextWrapping="Wrap"/>
 
-                            <ItemsControl ItemsSource="{Binding SelectedItem.AllLimits}">
+                            <!-- モデルグループごとの枠表示 (Antigravity: Gemini 4 Argon / Gemini Model / Claude & GPT Model) -->
+                            <ItemsControl x:Name="GroupedLimitsItemsControl"
+                                          ItemsSource="{Binding SelectedItem.LimitGroups}"
+                                          Visibility="{Binding SelectedItem.HasLimitGroups, Converter={StaticResource BooleanToVisibilityConverter}}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
-                                        <Grid Margin="0,2,0,4">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                                <ColumnDefinition Width="Auto"/>
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,0">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding Title}" FontSize="11" FontWeight="SemiBold" Foreground="#E5E7EB" Margin="0,0,6,0"/>
-                                                    <TextBlock Text="{Binding ResetTimeText}" FontSize="9" Foreground="#9CA3AF" VerticalAlignment="Center"/>
-                                                </StackPanel>
-                                                <TextBlock Text="{Binding LimitDescription}" FontSize="9" Foreground="#6B7280" TextTrimming="CharacterEllipsis"/>
+                                        <Border Background="#0E1312"
+                                                BorderBrush="#2C3C35"
+                                                BorderThickness="1"
+                                                CornerRadius="6"
+                                                Padding="8,4"
+                                                Margin="0,1,0,4">
+                                            <StackPanel>
+                                                <Border BorderBrush="#1F2C27" BorderThickness="0,0,0,1" Padding="0,0,0,2" Margin="0,0,0,2">
+                                                    <TextBlock Text="{Binding GroupTitle}"
+                                                               FontSize="9.5"
+                                                               FontWeight="Bold"
+                                                               Foreground="#93C5FD"/>
+                                                </Border>
+                                                <ItemsControl ItemsSource="{Binding Limits}"
+                                                              ItemTemplate="{StaticResource UsageLimitRowTemplate}"/>
                                             </StackPanel>
-                                            <TextBlock Grid.Column="1" 
-                                                       Text="{Binding DisplayPercentString}" 
-                                                       FontSize="12" FontWeight="Bold" Foreground="#F3F4F6" 
-                                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <Grid Grid.Column="2" Width="26" Height="26" VerticalAlignment="Center">
-                                                <controls:CircularProgressBar 
-                                                    Percentage="{Binding RemainingPercent}"
-                                                    ProgressBrush="{Binding RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
-                                                    StrokeThickness="3"/>
-                                            </Grid>
-                                        </Grid>
+                                        </Border>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- 通常のフラット表示 (グループ枠がないサービス用) -->
+                            <ItemsControl x:Name="AllLimitsItemsControl"
+                                          ItemsSource="{Binding SelectedItem.AllLimits}"
+                                          ItemTemplate="{StaticResource UsageLimitRowTemplate}">
+                                <ItemsControl.Style>
+                                    <Style TargetType="ItemsControl">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedItem.HasLimitGroups}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ItemsControl.Style>
                             </ItemsControl>
 
                             <!-- Grok 等の主制限を消費した機能別内訳。独立した残量リングにはしない。 -->

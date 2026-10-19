@@ -202,11 +202,180 @@ internal static class DetailViewChecks
         }
 
         // 同じ STA と安全に読み込んだ共有 Resources をカード操作の検証でも使う。
+        AssertAntigravityCardAndDetailModes(view);
         CardDragDropTests.RunOnStaThread();
         CliUpdateNotificationTests.RunOnStaThread();
         ResetTimeTests.RunOnStaThread();
         Check.True(Application.Current?.Windows.Count == 0,
             "カード操作の検証で実アプリのウィンドウを起動しないでください");
+    }
+
+    private static void AssertAntigravityCardAndDetailModes(DetailPopupView detailView)
+    {
+        var item = new AiUsageItem
+        {
+            ServiceType = AiServiceType.Gemini,
+            DisplayName = "Antigravity",
+            SubTitle = "Google DeepMind",
+            UsageSourceText = "取得元：IDE",
+            IsDataLoaded = true,
+            CliInfo = new CliInfo
+            {
+                Name = "Gemini (agy)",
+                CommandName = "agy",
+                IsInstalled = true,
+                IsLoggedIn = true,
+                IsSubscribed = true,
+                InstalledVersion = "1.0.0",
+                UsageCheckCommand = "agy -p \"/usage\"",
+                StatusMessage = "Google DeepMind 連携稼働中"
+            },
+            ArgonLimit = new UsageLimitInfo
+            {
+                Title = "Gemini 4 Argon",
+                LimitDescription = "Gemini 4 Argon Weekly Limit",
+                RemainingPercent = 93,
+                ResetTimeText = "10/26 22:29 リセット"
+            },
+            PrimaryLimit = new UsageLimitInfo
+            {
+                Title = "5時間制限",
+                LimitDescription = "Five Hour Limit Remaining",
+                RemainingPercent = 100,
+                ResetTimeText = "03:52 リセット"
+            },
+            SecondaryLimit = new UsageLimitInfo
+            {
+                Title = "週次制限",
+                LimitDescription = "Weekly Limit Remaining",
+                RemainingPercent = 100,
+                ResetTimeText = "10/26 22:52 リセット"
+            },
+            ExternalFiveHourLimit = new UsageLimitInfo
+            {
+                Title = "5時間制限 外部",
+                LimitDescription = "Claude / GPT models 5h limit",
+                RemainingPercent = 100,
+                ResetTimeText = "03:52 リセット"
+            },
+            ExternalWeeklyLimit = new UsageLimitInfo
+            {
+                Title = "週次制限 外部",
+                LimitDescription = "Claude / GPT models Weekly limit",
+                RemainingPercent = 100,
+                ResetTimeText = "10/26 22:52 リセット"
+            },
+            HasExternalLimits = true
+        };
+        item.AllLimits.Add(item.ArgonLimit!);
+        item.AllLimits.Add(item.PrimaryLimit);
+        item.AllLimits.Add(item.SecondaryLimit!);
+        item.AllLimits.Add(item.ExternalFiveHourLimit!);
+        item.AllLimits.Add(item.ExternalWeeklyLimit!);
+
+        item.LimitGroups.Add(new UsageLimitGroup
+        {
+            GroupTitle = "Gemini 4 Argon",
+            Limits = new ObservableCollection<UsageLimitInfo> { item.ArgonLimit! }
+        });
+        item.LimitGroups.Add(new UsageLimitGroup
+        {
+            GroupTitle = "Gemini Model",
+            Limits = new ObservableCollection<UsageLimitInfo> { item.PrimaryLimit, item.SecondaryLimit! }
+        });
+        item.LimitGroups.Add(new UsageLimitGroup
+        {
+            GroupTitle = "Claude & GPT Model",
+            Limits = new ObservableCollection<UsageLimitInfo> { item.ExternalFiveHourLimit!, item.ExternalWeeklyLimit! }
+        });
+
+        var card = new UsageCardView { DataContext = item, Width = 154 };
+        void ArrangeCard()
+        {
+            var size = new Size(154, 136);
+            card.Dispatcher.Invoke(() => { }, DispatcherPriority.DataBind);
+            card.Measure(size);
+            card.Arrange(new Rect(size));
+            card.UpdateLayout();
+            card.Dispatcher.Invoke(() => { }, DispatcherPriority.Render);
+            card.UpdateLayout();
+        }
+
+        ArrangeCard();
+        var switchButton = card.FindName("CardModeSwitchButton") as Button
+            ?? throw new InvalidOperationException("Antigravity: カード切替ボタンが見つかりません。");
+        Check.Equal(Visibility.Visible, switchButton.Visibility, "Antigravity: 切替ボタンが非表示です");
+        var pillText = Descendants<TextBlock>(switchButton).Single();
+
+        static bool IsShownInCard(DependencyObject element, DependencyObject root)
+        {
+            for (DependencyObject? current = element; current != null; current = VisualTreeHelper.GetParent(current))
+            {
+                if (current is UIElement ui && ui.Visibility != Visibility.Visible) return false;
+                if (ReferenceEquals(current, root)) return true;
+            }
+            return false;
+        }
+
+        // 1. デフォルト: Gemini 4 Argon (単一枠表示)
+        Check.Equal("Argon ⇄", pillText.Text, "Antigravity: デフォルトのピル表示が Argon ⇄ ではありません");
+        Check.True(Descendants<TextBlock>(card).Any(t => t.Text == "Gemini 4 Argon" && IsShownInCard(t, card)),
+            "Antigravity: デフォルトでカードに Gemini 4 Argon が単一枠表示されていません");
+        Check.True(!Descendants<TextBlock>(card).Any(t => t.Text == "週次制限" && IsShownInCard(t, card)),
+            "Antigravity: Argon単一枠表示時に2段目の週次制限が表示されています");
+        SaveImage(card, "card-antigravity-1-argon.png");
+
+        // 2. 1回クリック: Gemini (5時間 + 週次)
+        switchButton.Command.Execute(null);
+        ArrangeCard();
+        Check.Equal("Gemini ⇄", pillText.Text, "Antigravity: 2番目のピル表示が Gemini ⇄ ではありません");
+        Check.True(Descendants<TextBlock>(card).Any(t => t.Text == "5時間制限" && IsShownInCard(t, card)),
+            "Antigravity: Geminiモードで5時間制限が表示されていません");
+        Check.True(Descendants<TextBlock>(card).Any(t => t.Text == "週次制限" && IsShownInCard(t, card)),
+            "Antigravity: Geminiモードで週次制限が表示されていません");
+        SaveImage(card, "card-antigravity-2-gemini.png");
+
+        // 3. 2回クリック: Claude & GPT (5時間 外部 + 週次 外部)
+        switchButton.Command.Execute(null);
+        ArrangeCard();
+        Check.Equal("外部 ⇄", pillText.Text, "Antigravity: 3番目のピル表示が 外部 ⇄ ではありません");
+        Check.True(Descendants<TextBlock>(card).Any(t => t.Text == "5時間制限 外部" && IsShownInCard(t, card)),
+            "Antigravity: 外部モデルモードで5時間制限 外部が表示されていません");
+        Check.True(Descendants<TextBlock>(card).Any(t => t.Text == "週次制限 外部" && IsShownInCard(t, card)),
+            "Antigravity: 外部モデルモードで週次制限 外部が表示されていません");
+        SaveImage(card, "card-antigravity-3-external.png");
+
+        // 4. 3回クリック: Gemini 4 Argon に戻る
+        switchButton.Command.Execute(null);
+        ArrangeCard();
+        Check.Equal("Argon ⇄", pillText.Text, "Antigravity: 3回切替後に Argon ⇄ へ戻っていません");
+        Check.True(Descendants<TextBlock>(card).Any(t => t.Text == "Gemini 4 Argon" && IsShownInCard(t, card)),
+            "Antigravity: 3回切替後に Gemini 4 Argon の単一枠表示へ戻っていません");
+
+        // 5. 詳細表示で3グループ枠(Gemini 4 Argon / Gemini Model / Claude & GPT Model)と全5枠が表示されること
+        detailView.DataContext = new DetailTestContext(item);
+        var scrollViewer = (ScrollViewer)detailView.FindName("DetailScrollViewer");
+        scrollViewer.ScrollToTop();
+        Arrange(detailView);
+        var groupedControl = detailView.FindName("GroupedLimitsItemsControl") as ItemsControl
+            ?? throw new InvalidOperationException("GroupedLimitsItemsControl が見つかりません。");
+        var ungroupedControl = detailView.FindName("AllLimitsItemsControl") as ItemsControl
+            ?? throw new InvalidOperationException("AllLimitsItemsControl が見つかりません。");
+        Check.Equal(Visibility.Visible, groupedControl.Visibility, "Antigravity詳細画面: グループ枠表示が非表示です");
+        Check.Equal(Visibility.Collapsed, ungroupedControl.Visibility, "Antigravity詳細画面: フラット表示が隠れていません");
+
+        foreach (var expectedGroupTitle in new[] { "Gemini 4 Argon", "Gemini Model", "Claude & GPT Model" })
+        {
+            Check.True(Descendants<TextBlock>(groupedControl).Any(t => t.Text == expectedGroupTitle && IsShownInCard(t, detailView)),
+                $"Antigravity詳細画面: グループ枠 {expectedGroupTitle} が表示されていません");
+        }
+        foreach (var expectedTitle in new[] { "Gemini 4 Argon", "5時間制限", "週次制限", "5時間制限 外部", "週次制限 外部" })
+        {
+            Check.True(Descendants<TextBlock>(groupedControl).Any(t => t.Text == expectedTitle && IsShownInCard(t, detailView)),
+                $"Antigravity詳細画面: {expectedTitle} がグループ枠内に表示されていません");
+        }
+        SaveImage(detailView, "detail-antigravity-argon.png");
+        Console.WriteLine("成功: Antigravity: Gemini 4 Argon / Gemini Model / Claude & GPT Model のカード3段階切替と詳細3グループ枠表示");
     }
 
     private static ResourceDictionary LoadApplicationResources()

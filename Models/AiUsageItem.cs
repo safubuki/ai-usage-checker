@@ -3,6 +3,13 @@ using AIUsageChecker.ViewModels;
 
 namespace AIUsageChecker.Models;
 
+public enum AntigravityCardMode
+{
+    Argon = 0,
+    Gemini = 1,
+    External = 2
+}
+
 public class AiUsageItem : ViewModelBase
 {
     private AiServiceType _serviceType;
@@ -13,6 +20,7 @@ public class AiUsageItem : ViewModelBase
     private UsageLimitInfo _primaryLimit = new();
     private UsageLimitInfo? _secondaryLimit;
     private ObservableCollection<UsageLimitInfo> _allLimits = new();
+    private readonly ObservableCollection<UsageLimitGroup> _limitGroups = new();
     private readonly ObservableCollection<UsageLimitInfo> _usageBreakdown = new();
     private readonly ObservableCollection<ResetCreditInfo> _resetCredits = new();
     private int _resetCreditsAvailableCount;
@@ -27,13 +35,16 @@ public class AiUsageItem : ViewModelBase
     private bool _isRecoveredGlowActive;
     private double? _prevPrimaryPercent;
     private double? _prevSecondaryPercent;
+    private UsageLimitInfo? _argonLimit;
     private UsageLimitInfo? _externalFiveHourLimit;
     private UsageLimitInfo? _externalWeeklyLimit;
     private bool _hasExternalLimits;
-    private bool _isShowingExternal;
+    private AntigravityCardMode _cardMode = AntigravityCardMode.Argon;
+    private RelayCommand? _cycleCardModeCommand;
 
     public AiUsageItem()
     {
+        _limitGroups.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasLimitGroups));
         _usageBreakdown.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasUsageBreakdown));
         _resetCredits.CollectionChanged += (_, _) =>
         {
@@ -83,7 +94,7 @@ public class AiUsageItem : ViewModelBase
     public void UpdateStatusAndCheckRecovery()
     {
         // データロード前、未契約時、未ログイン時、または表示が "--" の場合は警告枠（赤枠・黄色枠）や回復緑枠を表示しない
-        if (!IsDataLoaded || !CliInfo.IsSubscribed || !CliInfo.IsLoggedIn || PrimaryLimit.CustomDisplayPercentText == "--")
+        if (!IsDataLoaded || !CliInfo.IsSubscribed || !CliInfo.IsLoggedIn || CardPrimaryLimit.CustomDisplayPercentText == "--")
         {
             IsWeeklyExhausted = false;
             IsFiveHourExhausted = false;
@@ -91,33 +102,7 @@ public class AiUsageItem : ViewModelBase
             return;
         }
 
-        // 週次制限の枯渇判定 (SecondaryLimit または 週次制限のPrimaryLimit)
-        bool weeklyExhausted = false;
-        if (SecondaryLimit != null && SecondaryLimit.Title.Contains("週次"))
-        {
-            weeklyExhausted = SecondaryLimit.RemainingPercent <= 0.0;
-        }
-        else if (PrimaryLimit.Title.Contains("週次") || ServiceType == AiServiceType.Grok)
-        {
-            weeklyExhausted = PrimaryLimit.RemainingPercent <= 0.0;
-        }
-        IsWeeklyExhausted = weeklyExhausted;
-
-        // 5時間制限の有無および枯渇判定
-        bool hasFiveHour = false;
-        bool fiveHourExhausted = false;
-        if (PrimaryLimit.Title.Contains("5時間"))
-        {
-            hasFiveHour = true;
-            fiveHourExhausted = PrimaryLimit.RemainingPercent <= 0.0;
-        }
-        else if (SecondaryLimit != null && SecondaryLimit.Title.Contains("5時間"))
-        {
-            hasFiveHour = true;
-            fiveHourExhausted = SecondaryLimit.RemainingPercent <= 0.0;
-        }
-        HasFiveHourLimit = hasFiveHour;
-        IsFiveHourExhausted = fiveHourExhausted;
+        UpdateWarningFlagsForCurrentMode();
 
         // 0% -> 100% 回復時のホタル点滅判定 (週次制限枯渇時はAIが利用不可のため回復緑枠は出さない)
         double currPrimary = PrimaryLimit.RemainingPercent;
@@ -142,6 +127,47 @@ public class AiUsageItem : ViewModelBase
         // 前回のパーセントを保存
         _prevPrimaryPercent = currPrimary;
         _prevSecondaryPercent = currSecondary;
+    }
+
+    private void UpdateWarningFlagsForCurrentMode()
+    {
+        if (!IsDataLoaded || !CliInfo.IsSubscribed || !CliInfo.IsLoggedIn || CardPrimaryLimit.CustomDisplayPercentText == "--")
+        {
+            IsWeeklyExhausted = false;
+            IsFiveHourExhausted = false;
+            return;
+        }
+
+        var primary = CardPrimaryLimit;
+        var secondary = CardSecondaryLimit;
+
+        // 週次制限の枯渇判定 (CardSecondaryLimit または 週次制限/ArgonのCardPrimaryLimit)
+        bool weeklyExhausted = false;
+        if (secondary != null && secondary.Title.Contains("週次"))
+        {
+            weeklyExhausted = secondary.RemainingPercent <= 0.0;
+        }
+        else if (primary.Title.Contains("週次") || primary.Title.Contains("Argon", StringComparison.OrdinalIgnoreCase) || ServiceType == AiServiceType.Grok)
+        {
+            weeklyExhausted = primary.RemainingPercent <= 0.0;
+        }
+        IsWeeklyExhausted = weeklyExhausted;
+
+        // 5時間制限の有無および枯渇判定
+        bool hasFiveHour = false;
+        bool fiveHourExhausted = false;
+        if (primary.Title.Contains("5時間"))
+        {
+            hasFiveHour = true;
+            fiveHourExhausted = primary.RemainingPercent <= 0.0;
+        }
+        else if (secondary != null && secondary.Title.Contains("5時間"))
+        {
+            hasFiveHour = true;
+            fiveHourExhausted = secondary.RemainingPercent <= 0.0;
+        }
+        HasFiveHourLimit = hasFiveHour;
+        IsFiveHourExhausted = fiveHourExhausted;
     }
 
     public AiServiceType ServiceType
@@ -204,7 +230,33 @@ public class AiUsageItem : ViewModelBase
     }
 
     /// <summary>
-    /// 外部モデル(Claude / GPT)の5時間制限。Geminiカードの切替表示で使用する。
+    /// 詳細画面でモデルグループごとに枠で囲んで表示するためのコレクション (Gemini 4 Argon / Gemini Model / Claude &amp; GPT Model 等)。
+    /// </summary>
+    public ObservableCollection<UsageLimitGroup> LimitGroups => _limitGroups;
+
+    public bool HasLimitGroups => _limitGroups.Count > 0;
+
+    /// <summary>
+    /// Gemini 4 Argon の週次制限枠。Antigravityカードの既定(1枠)表示および詳細表示で使用する。
+    /// </summary>
+    public UsageLimitInfo? ArgonLimit
+    {
+        get => _argonLimit;
+        set
+        {
+            if (SetProperty(ref _argonLimit, value))
+            {
+                OnPropertyChanged(nameof(HasArgonLimit));
+                OnPropertyChanged(nameof(HasCardModeSwitch));
+                NotifyCardLimitsChanged();
+            }
+        }
+    }
+
+    public bool HasArgonLimit => _argonLimit != null;
+
+    /// <summary>
+    /// 外部モデル(Claude / GPT)の5時間制限。Antigravityカードの切替表示で使用する。
     /// </summary>
     public UsageLimitInfo? ExternalFiveHourLimit
     {
@@ -216,7 +268,7 @@ public class AiUsageItem : ViewModelBase
     }
 
     /// <summary>
-    /// 外部モデル(Claude / GPT)の週次制限。Geminiカードの切替表示で使用する。
+    /// 外部モデル(Claude / GPT)の週次制限。Antigravityカードの切替表示で使用する。
     /// </summary>
     public UsageLimitInfo? ExternalWeeklyLimit
     {
@@ -228,42 +280,112 @@ public class AiUsageItem : ViewModelBase
     }
 
     /// <summary>
-    /// 外部モデル枠(5時間＋週次)が揃っており、カード上で切替ボタンを出せるか。
+    /// 外部モデル枠(5時間＋週次)が揃っているか。
     /// </summary>
     public bool HasExternalLimits
     {
         get => _hasExternalLimits;
         set
         {
-            if (SetProperty(ref _hasExternalLimits, value)) NotifyCardLimitsChanged();
+            if (SetProperty(ref _hasExternalLimits, value))
+            {
+                OnPropertyChanged(nameof(HasCardModeSwitch));
+                NotifyCardLimitsChanged();
+            }
         }
     }
 
     /// <summary>
-    /// カードに外部モデル枠を表示中か (false = Gemini枠、既定)。切替ボタンと双方向バインドする。
+    /// カード上で表示対象切替ボタンを出せるか (Argon枠または外部モデル枠がある場合)。
     /// </summary>
-    public bool IsShowingExternal
+    public bool HasCardModeSwitch => HasArgonLimit || HasExternalLimits;
+
+    /// <summary>
+    /// カードで選択されている表示モード (既定: Argon -> Gemini -> External の順で切替)。
+    /// </summary>
+    public AntigravityCardMode CardMode
     {
-        get => _isShowingExternal;
+        get => _cardMode;
         set
         {
-            if (SetProperty(ref _isShowingExternal, value)) NotifyCardLimitsChanged();
+            if (SetProperty(ref _cardMode, value))
+            {
+                NotifyCardLimitsChanged();
+                UpdateWarningFlagsForCurrentMode();
+            }
         }
     }
 
-    private bool UseExternalOnCard => IsShowingExternal && HasExternalLimits;
+    /// <summary>
+    /// 利用可能なデータに応じて実際にカードへ適用される表示モード。
+    /// </summary>
+    public AntigravityCardMode EffectiveCardMode => _cardMode switch
+    {
+        AntigravityCardMode.Argon when HasArgonLimit => AntigravityCardMode.Argon,
+        AntigravityCardMode.External when HasExternalLimits => AntigravityCardMode.External,
+        AntigravityCardMode.Gemini => AntigravityCardMode.Gemini,
+        _ => HasArgonLimit ? AntigravityCardMode.Argon : AntigravityCardMode.Gemini
+    };
 
-    /// <summary>カード上段に表示する制限 (切替状態に応じて Gemini / 外部モデル)</summary>
-    public UsageLimitInfo CardPrimaryLimit => UseExternalOnCard ? ExternalFiveHourLimit! : PrimaryLimit;
+    /// <summary>
+    /// カードに外部モデル枠を表示中か (互換用プロパティ)。
+    /// </summary>
+    public bool IsShowingExternal
+    {
+        get => EffectiveCardMode == AntigravityCardMode.External;
+        set => CardMode = value
+            ? AntigravityCardMode.External
+            : (HasArgonLimit ? AntigravityCardMode.Argon : AntigravityCardMode.Gemini);
+    }
 
-    /// <summary>カード下段に表示する制限 (切替状態に応じて Gemini / 外部モデル)</summary>
-    public UsageLimitInfo? CardSecondaryLimit => UseExternalOnCard ? ExternalWeeklyLimit : SecondaryLimit;
+    public RelayCommand CycleCardModeCommand => _cycleCardModeCommand ??= new RelayCommand(CycleCardMode);
+
+    /// <summary>
+    /// Gemini 4 Argon -> Gemini (5h+週次) -> Claude &amp; GPT (5h+週次) の順で表示対象を切り替える。
+    /// </summary>
+    public void CycleCardMode()
+    {
+        var modes = new System.Collections.Generic.List<AntigravityCardMode>();
+        if (HasArgonLimit) modes.Add(AntigravityCardMode.Argon);
+        modes.Add(AntigravityCardMode.Gemini);
+        if (HasExternalLimits) modes.Add(AntigravityCardMode.External);
+
+        if (modes.Count <= 1) return;
+
+        var current = EffectiveCardMode;
+        var index = modes.IndexOf(current);
+        var nextIndex = (index + 1) % modes.Count;
+        CardMode = modes[nextIndex];
+    }
+
+    /// <summary>カード上段(または単一枠)に表示する制限 (切替状態に応じて Argon / Gemini / 外部モデル)</summary>
+    public UsageLimitInfo CardPrimaryLimit => EffectiveCardMode switch
+    {
+        AntigravityCardMode.Argon => ArgonLimit!,
+        AntigravityCardMode.External => (ExternalFiveHourLimit ?? ExternalWeeklyLimit)!,
+        _ => PrimaryLimit
+    };
+
+    /// <summary>カード下段に表示する制限 (Argon時はnullで単一表示、Gemini / 外部モデル時は週次制限)</summary>
+    public UsageLimitInfo? CardSecondaryLimit => EffectiveCardMode switch
+    {
+        AntigravityCardMode.Argon => null,
+        AntigravityCardMode.External => ExternalFiveHourLimit != null ? ExternalWeeklyLimit : null,
+        _ => SecondaryLimit
+    };
 
     /// <summary>切替ボタンに表示する現在の表示対象</summary>
-    public string CardModeLabel => UseExternalOnCard ? "外部" : "Gemini";
+    public string CardModeLabel => EffectiveCardMode switch
+    {
+        AntigravityCardMode.Argon => "Argon",
+        AntigravityCardMode.External => "外部",
+        _ => "Gemini"
+    };
 
     private void NotifyCardLimitsChanged()
     {
+        OnPropertyChanged(nameof(EffectiveCardMode));
+        OnPropertyChanged(nameof(IsShowingExternal));
         OnPropertyChanged(nameof(CardPrimaryLimit));
         OnPropertyChanged(nameof(CardSecondaryLimit));
         OnPropertyChanged(nameof(CardModeLabel));

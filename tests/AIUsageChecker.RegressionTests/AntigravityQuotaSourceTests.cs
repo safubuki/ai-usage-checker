@@ -22,6 +22,7 @@ internal static class AntigravityQuotaSourceTests
         }
         yield return new("Antigravity: 旧オブジェクトキャッシュの取得元は不明と表示", () => LegacyCacheAsync(isArray: false));
         yield return new("Antigravity: 旧配列キャッシュの取得元は不明と表示", () => LegacyCacheAsync(isArray: true));
+        yield return new("Antigravity: Gemini 4 Argon取得・3段階カード切替・詳細表示順序", ArgonAndCardModeSwitchAsync);
     }
 
     private static AiUsageItem CreateItem() => new()
@@ -175,6 +176,99 @@ internal static class AntigravityQuotaSourceTests
 
         await fetcher.FetchUsageAsync(item);
         CheckSource(item, "取得失敗（前回の取得元：不明）");
+    }
+
+    private static async Task ArgonAndCardModeSwitchAsync()
+    {
+        using var temp = new TemporaryDirectory();
+        var fetcher = new FakeUsageFetcher(temp.FilePath("cache.json"))
+        {
+            AgyResponse =
+            [
+                new QuotaGroup
+                {
+                    DisplayName = "Gemini Models",
+                    Buckets =
+                    [
+                        new QuotaBucket { BucketId = "gemini-weekly", DisplayName = "Weekly Limit Remaining", Window = "weekly", RemainingFraction = 1.0 },
+                        new QuotaBucket { BucketId = "gemini-5h", DisplayName = "Five Hour Limit Remaining", Window = "5h", RemainingFraction = 0.85 }
+                    ]
+                },
+                new QuotaGroup
+                {
+                    DisplayName = "Claude and GPT models",
+                    Buckets =
+                    [
+                        new QuotaBucket { BucketId = "3p-weekly", DisplayName = "Weekly Limit Remaining", Window = "weekly", RemainingFraction = 0.70 },
+                        new QuotaBucket { BucketId = "3p-5h", DisplayName = "Five Hour Limit Remaining", Window = "5h", RemainingFraction = 0.60 }
+                    ]
+                },
+                new QuotaGroup
+                {
+                    DisplayName = "Gemini 4 Argon",
+                    Buckets =
+                    [
+                        new QuotaBucket { BucketId = "gemini-argon-wtu-weekly", DisplayName = "Gemini 4 Argon Weekly Limit", Window = "weekly", RemainingFraction = 0.93 }
+                    ]
+                }
+            ]
+        };
+
+        var item = CreateItem();
+        await fetcher.FetchUsageAsync(item);
+
+        Check.True(item.HasArgonLimit, "Gemini 4 Argon の制限枠を取得できていません");
+        Check.True(item.HasExternalLimits, "Claude & GPT の外部制限枠を取得できていません");
+        Check.True(item.HasCardModeSwitch, "カード表示切替が有効になっていません");
+
+        // 1. デフォルトは1つで Gemini 4 Argon を表示
+        Check.Equal(AntigravityCardMode.Argon, item.EffectiveCardMode, "デフォルトモードが Gemini 4 Argon ではありません");
+        Check.Equal("Argon", item.CardModeLabel, "Argonモード時の切替ラベルが一致しません");
+        Check.Equal("Gemini 4 Argon", item.CardPrimaryLimit.Title, "デフォルトのカード主枠タイトルが Gemini 4 Argon ではありません");
+        Check.Equal(93d, item.CardPrimaryLimit.RemainingPercent, "Gemini 4 Argon の残量が一致しません");
+        Check.True(item.CardSecondaryLimit == null, "Argon表示時は単一枠(CardSecondaryLimit == null)である必要があります");
+
+        // 2. 1回切り替え: Gemini モデルの 5時間と週次を表示
+        item.CycleCardMode();
+        Check.Equal(AntigravityCardMode.Gemini, item.EffectiveCardMode, "2番目のモードが Gemini ではありません");
+        Check.Equal("Gemini", item.CardModeLabel, "Geminiモード時の切替ラベルが一致しません");
+        Check.Equal("5時間制限", item.CardPrimaryLimit.Title, "Geminiモード上段が5時間制限ではありません");
+        Check.Equal(85d, item.CardPrimaryLimit.RemainingPercent, "Gemini 5時間制限の残量が一致しません");
+        Check.True(item.CardSecondaryLimit != null, "Geminiモード下段(週次制限)がありません");
+        Check.Equal("週次制限", item.CardSecondaryLimit!.Title, "Geminiモード下段が週次制限ではありません");
+        Check.Equal(100d, item.CardSecondaryLimit.RemainingPercent, "Gemini 週次制限の残量が一致しません");
+
+        // 3. 2回切り替え: Claude & GPT モデルの 5時間と週次を表示
+        item.CycleCardMode();
+        Check.Equal(AntigravityCardMode.External, item.EffectiveCardMode, "3番目のモードが External (Claude & GPT) ではありません");
+        Check.Equal("外部", item.CardModeLabel, "外部モデルモード時の切替ラベルが一致しません");
+        Check.Equal("5時間制限 外部", item.CardPrimaryLimit.Title, "外部モデルモード上段が5時間制限 外部ではありません");
+        Check.Equal(60d, item.CardPrimaryLimit.RemainingPercent, "外部モデル 5時間制限の残量が一致しません");
+        Check.True(item.CardSecondaryLimit != null, "外部モデルモード下段(週次制限)がありません");
+        Check.Equal("週次制限 外部", item.CardSecondaryLimit!.Title, "外部モデルモード下段が週次制限 外部ではありません");
+        Check.Equal(70d, item.CardSecondaryLimit.RemainingPercent, "外部モデル 週次制限の残量が一致しません");
+
+        // 4. 3回切り替え: 再び Gemini 4 Argon に戻る
+        item.CycleCardMode();
+        Check.Equal(AntigravityCardMode.Argon, item.EffectiveCardMode, "3回切替後に Gemini 4 Argon へ戻っていません");
+        Check.True(item.CardSecondaryLimit == null, "Argon復帰時に単一枠表示へ戻っていません");
+
+        // 5. 詳細表示 (AllLimits および LimitGroups) でも全5枠・3グループが順番通り構成されること
+        Check.Equal(5, item.AllLimits.Count, "詳細表示用の AllLimits に5枠すべてが含まれていません");
+        Check.Equal("Gemini 4 Argon", item.AllLimits[0].Title, "詳細表示1番目が Gemini 4 Argon ではありません");
+        Check.Equal("5時間制限", item.AllLimits[1].Title, "詳細表示2番目が Gemini 5時間制限 ではありません");
+        Check.Equal("週次制限", item.AllLimits[2].Title, "詳細表示3番目が Gemini 週次制限 ではありません");
+        Check.Equal("5時間制限 外部", item.AllLimits[3].Title, "詳細表示4番目が 5時間制限 外部 ではありません");
+        Check.Equal("週次制限 外部", item.AllLimits[4].Title, "詳細表示5番目が 週次制限 外部 ではありません");
+
+        Check.True(item.HasLimitGroups, "詳細表示用の LimitGroups が有効になっていません");
+        Check.Equal(3, item.LimitGroups.Count, "詳細表示用の LimitGroups が3グループではありません");
+        Check.Equal("Gemini 4 Argon", item.LimitGroups[0].GroupTitle, "1番目のグループ名が Gemini 4 Argon ではありません");
+        Check.Equal(1, item.LimitGroups[0].Limits.Count, "Gemini 4 Argon グループの枠数が1ではありません");
+        Check.Equal("Gemini Model", item.LimitGroups[1].GroupTitle, "2番目のグループ名が Gemini Model ではありません");
+        Check.Equal(2, item.LimitGroups[1].Limits.Count, "Gemini Model グループの枠数が2ではありません");
+        Check.Equal("Claude & GPT Model", item.LimitGroups[2].GroupTitle, "3番目のグループ名が Claude & GPT Model ではありません");
+        Check.Equal(2, item.LimitGroups[2].Limits.Count, "Claude & GPT Model グループの枠数が2ではありません");
     }
 
     private static FakeUsageFetcher CreateSuccessfulFetcher(string cachePath, UsageDataSource source) => new(cachePath)

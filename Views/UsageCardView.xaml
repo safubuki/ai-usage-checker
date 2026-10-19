@@ -123,8 +123,8 @@
                 <!-- 中央部: 利用制限表示 -->
                 <Grid Grid.Row="1" VerticalAlignment="Center" Margin="0,2">
                     <!-- パターンA: 2重制限表示 (5時間制限 ＋ 週次制限の両方がある場合)
-                         Gemini カードでは下部の切替ボタンにより Card*Limit が外部モデル枠に切り替わる -->
-                    <StackPanel Visibility="{Binding SecondaryLimit, Converter={StaticResource NullToVisibilityConverter}}" 
+                         Antigravity カードでは下部の切替ボタンにより Gemini枠 / 外部モデル枠 に切り替わる -->
+                    <StackPanel Visibility="{Binding CardSecondaryLimit, Converter={StaticResource NullToVisibilityConverter}}" 
                                 VerticalAlignment="Center">
                         <!-- 1段目: 5時間制限 -->
                         <Grid Margin="0,0,0,2">
@@ -176,8 +176,8 @@
                         </Grid>
                     </StackPanel>
 
-                    <!-- パターンB: 単一制限表示 (Grok, Copilot, Claude 等) -->
-                    <Grid Visibility="{Binding SecondaryLimit, Converter={StaticResource NullToVisibilityConverter}, ConverterParameter=Inverse}" 
+                    <!-- パターンB: 単一制限表示 (Gemini 4 Argon, Grok, Copilot, Claude 等) -->
+                    <Grid Visibility="{Binding CardSecondaryLimit, Converter={StaticResource NullToVisibilityConverter}, ConverterParameter=Inverse}" 
                           VerticalAlignment="Center">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -186,18 +186,18 @@
 
                         <!-- 左側: メイン制限名とリセット時間 -->
                         <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,2,0">
-                            <TextBlock Text="{Binding PrimaryLimit.Title}" FontSize="11" FontWeight="SemiBold" Foreground="#D1D5DB"/>
-                            <TextBlock Text="{Binding PrimaryLimit.ResetTimeText}" FontSize="10" FontWeight="SemiBold" Foreground="#E2E8F0" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
+                            <TextBlock Text="{Binding CardPrimaryLimit.Title}" FontSize="11" FontWeight="SemiBold" Foreground="#D1D5DB" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding CardPrimaryLimit.ResetTimeText}" FontSize="10" FontWeight="SemiBold" Foreground="#E2E8F0" TextTrimming="CharacterEllipsis" Margin="0,1,0,0"/>
                             <TextBlock Text="{Binding SubTitle}" FontSize="8.5" Foreground="#6B7280" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
                         </StackPanel>
 
                         <!-- 右側: 円形プログレスリングとパーセンテージ -->
                         <Grid Grid.Column="1" Width="44" Height="44" Margin="4,0,0,0">
                             <controls:CircularProgressBar 
-                                Percentage="{Binding PrimaryLimit.RemainingPercent}"
-                                ProgressBrush="{Binding PrimaryLimit.RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
+                                Percentage="{Binding CardPrimaryLimit.RemainingPercent}"
+                                ProgressBrush="{Binding CardPrimaryLimit.RemainingPercent, Converter={StaticResource RemainingToBrushConverter}}"
                                 StrokeThickness="3.5"/>
-                            <TextBlock Text="{Binding PrimaryLimit.DisplayPercentString}" 
+                            <TextBlock Text="{Binding CardPrimaryLimit.DisplayPercentString}" 
                                        FontSize="11" 
                                        FontWeight="Bold" 
                                        Foreground="#E5E7EB" 
@@ -226,7 +226,7 @@
                             CommandParameter="{Binding}"
                             ToolTip="左に移動"/>
 
-                    <!-- リセット権も外部モデル枠もない場合: 通常の 詳細表示 ↗ -->
+                    <!-- リセット権もモデル切替枠もない場合: 通常の 詳細表示 ↗ -->
                     <TextBlock Grid.Column="1" 
                                Text="詳細表示 ↗" 
                                FontSize="9" 
@@ -238,7 +238,7 @@
                             <Style TargetType="TextBlock">
                                 <Setter Property="Visibility" Value="{Binding HasResetCredits, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=Inverse}"/>
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding HasExternalLimits}" Value="True">
+                                    <DataTrigger Binding="{Binding HasCardModeSwitch}" Value="True">
                                         <Setter Property="Visibility" Value="Collapsed"/>
                                     </DataTrigger>
                                 </Style.Triggers>
@@ -246,19 +246,20 @@
                         </TextBlock.Style>
                     </TextBlock>
 
-                    <!-- 外部モデル枠がある場合 (Gemini): [Gemini ⇄] 切替ピル + 詳細 ↗
-                         ToggleButton は ButtonBase 派生のため、押してもカードの詳細表示・ドラッグは発生しない -->
+                    <!-- モデル切替枠がある場合 (Antigravity): [Argon ⇄ / Gemini ⇄ / 外部 ⇄] 切替ピル + 詳細 ↗
+                         Button は ButtonBase 派生のため、押してもカードの詳細表示・ドラッグは発生しない -->
                     <StackPanel Grid.Column="1" 
                                 Orientation="Horizontal" 
                                 HorizontalAlignment="Center" 
                                 VerticalAlignment="Center"
-                                Visibility="{Binding HasExternalLimits, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <ToggleButton IsChecked="{Binding IsShowingExternal, Mode=TwoWay}"
-                                      Cursor="Hand"
-                                      Margin="0,0,4,0"
-                                      ToolTip="Gemini と外部モデル (Claude / GPT) の表示を切替">
-                            <ToggleButton.Template>
-                                <ControlTemplate TargetType="ToggleButton">
+                                Visibility="{Binding HasCardModeSwitch, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <Button x:Name="CardModeSwitchButton"
+                                Command="{Binding CycleCardModeCommand}"
+                                Cursor="Hand"
+                                Margin="0,0,4,0"
+                                ToolTip="表示切替: Gemini 4 Argon → Gemini → Claude &amp; GPT">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
                                     <Border x:Name="Pill"
                                             Background="#1E3A5F" 
                                             BorderBrush="#74AFFF" 
@@ -272,18 +273,23 @@
                                                    Foreground="#BFDBFE"/>
                                     </Border>
                                     <ControlTemplate.Triggers>
-                                        <Trigger Property="IsChecked" Value="True">
+                                        <DataTrigger Binding="{Binding EffectiveCardMode}" Value="Argon">
+                                            <Setter TargetName="Pill" Property="Background" Value="#2A1F4D"/>
+                                            <Setter TargetName="Pill" Property="BorderBrush" Value="#A78BFA"/>
+                                            <Setter TargetName="PillText" Property="Foreground" Value="#DDD6FE"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding EffectiveCardMode}" Value="External">
                                             <Setter TargetName="Pill" Property="Background" Value="#4A2E1C"/>
                                             <Setter TargetName="Pill" Property="BorderBrush" Value="#DE8B59"/>
                                             <Setter TargetName="PillText" Property="Foreground" Value="#FCD9BD"/>
-                                        </Trigger>
+                                        </DataTrigger>
                                         <Trigger Property="IsMouseOver" Value="True">
                                             <Setter TargetName="Pill" Property="Opacity" Value="0.85"/>
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
-                            </ToggleButton.Template>
-                        </ToggleButton>
+                            </Button.Template>
+                        </Button>
                         <TextBlock Text="詳細 ↗" 
                                    FontSize="9" 
                                    Foreground="#10B981" 

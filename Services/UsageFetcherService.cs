@@ -331,8 +331,11 @@ public class UsageFetcherService
         }
 
         item.IsDataLoaded = true;
+        item.ArgonLimit?.RefreshDisplay();
         item.PrimaryLimit.RefreshDisplay();
         item.SecondaryLimit?.RefreshDisplay();
+        item.ExternalFiveHourLimit?.RefreshDisplay();
+        item.ExternalWeeklyLimit?.RefreshDisplay();
         item.UpdateStatusAndCheckRecovery();
         item.LastRefreshed = hasUsageError
             ? GetLastSuccessfulRefresh(item.ServiceType) ?? item.LastRefreshed
@@ -346,6 +349,11 @@ public class UsageFetcherService
             item.CliInfo.StatusMessage = "利用枠の取得エラー (次回更新で再試行)";
         }
 
+        item.ArgonLimit = null;
+        item.ExternalFiveHourLimit = null;
+        item.ExternalWeeklyLimit = null;
+        item.HasExternalLimits = false;
+
         ResetLimitForError(item.PrimaryLimit);
         if (item.SecondaryLimit != null)
         {
@@ -353,6 +361,7 @@ public class UsageFetcherService
         }
 
         item.AllLimits.Clear();
+        item.LimitGroups.Clear();
         item.AllLimits.Add(item.PrimaryLimit);
         if (item.SecondaryLimit != null)
         {
@@ -604,58 +613,128 @@ public class UsageFetcherService
         item.DisplayName = "Antigravity";
         item.SubTitle = "Google DeepMind";
 
-        var geminiGroup = groups?.FirstOrDefault(g => g.DisplayName.Contains("Gemini", StringComparison.OrdinalIgnoreCase));
-        if (geminiGroup != null)
+        var argonGroup = FindArgonGroup(groups);
+        var geminiGroup = FindGeminiModelsGroup(groups);
+
+        var argonBucket = argonGroup?.Buckets.FirstOrDefault(b =>
+            b.Window.Equals("weekly", StringComparison.OrdinalIgnoreCase) ||
+            b.DisplayName.Contains("Weekly", StringComparison.OrdinalIgnoreCase) ||
+            b.DisplayName.Contains("Argon", StringComparison.OrdinalIgnoreCase))
+            ?? argonGroup?.Buckets.FirstOrDefault();
+
+        if (geminiGroup != null || argonBucket != null)
         {
-            var weeklyBucket = geminiGroup.Buckets.FirstOrDefault(b => b.Window == "weekly" || b.DisplayName.Contains("Weekly", StringComparison.OrdinalIgnoreCase));
-            var fiveHourBucket = geminiGroup.Buckets.FirstOrDefault(b => b.Window == "5h" || b.DisplayName.Contains("Five Hour", StringComparison.OrdinalIgnoreCase));
-
-            if (fiveHourBucket != null)
+            if (argonBucket != null)
             {
-                item.PrimaryLimit.Title = "5時間制限";
-                item.PrimaryLimit.LimitDescription = !string.IsNullOrEmpty(fiveHourBucket.Description) ? fiveHourBucket.Description : "Five Hour Limit Remaining";
-                item.PrimaryLimit.RemainingPercent = fiveHourBucket.RemainingFraction * 100.0;
-                item.PrimaryLimit.CustomDisplayPercentText = null;
-                item.PrimaryLimit.ResetTimeText = FormatResetTime(fiveHourBucket.ResetTime, "リセット");
+                item.ArgonLimit = new UsageLimitInfo
+                {
+                    Title = "Gemini 4 Argon",
+                    LimitDescription = !string.IsNullOrEmpty(argonBucket.DisplayName)
+                        ? argonBucket.DisplayName
+                        : "Gemini 4 Argon Weekly Limit",
+                    RemainingPercent = argonBucket.RemainingFraction * 100.0,
+                    ResetTimeText = FormatResetTime(argonBucket.ResetTime, "リセット")
+                };
+            }
+            else
+            {
+                item.ArgonLimit = null;
+            }
 
-                if (weeklyBucket != null)
+            bool hasGeminiBuckets = false;
+            if (geminiGroup != null)
+            {
+                var weeklyBucket = geminiGroup.Buckets.FirstOrDefault(b => b.Window == "weekly" || b.DisplayName.Contains("Weekly", StringComparison.OrdinalIgnoreCase));
+                var fiveHourBucket = geminiGroup.Buckets.FirstOrDefault(b => b.Window == "5h" || b.DisplayName.Contains("Five Hour", StringComparison.OrdinalIgnoreCase));
+
+                if (fiveHourBucket != null)
                 {
-                    if (item.SecondaryLimit == null) item.SecondaryLimit = new UsageLimitInfo();
-                    item.SecondaryLimit.Title = "週次制限";
-                    item.SecondaryLimit.LimitDescription = !string.IsNullOrEmpty(weeklyBucket.Description) ? weeklyBucket.Description : "Weekly Limit Remaining";
-                    item.SecondaryLimit.RemainingPercent = weeklyBucket.RemainingFraction * 100.0;
-                    item.SecondaryLimit.CustomDisplayPercentText = null;
-                    item.SecondaryLimit.ResetTimeText = FormatResetTime(weeklyBucket.ResetTime, "リセット");
+                    hasGeminiBuckets = true;
+                    item.PrimaryLimit.Title = "5時間制限";
+                    item.PrimaryLimit.LimitDescription = !string.IsNullOrEmpty(fiveHourBucket.Description) ? fiveHourBucket.Description : "Five Hour Limit Remaining";
+                    item.PrimaryLimit.RemainingPercent = fiveHourBucket.RemainingFraction * 100.0;
+                    item.PrimaryLimit.CustomDisplayPercentText = null;
+                    item.PrimaryLimit.ResetTimeText = FormatResetTime(fiveHourBucket.ResetTime, "リセット");
+
+                    if (weeklyBucket != null)
+                    {
+                        if (item.SecondaryLimit == null) item.SecondaryLimit = new UsageLimitInfo();
+                        item.SecondaryLimit.Title = "週次制限";
+                        item.SecondaryLimit.LimitDescription = !string.IsNullOrEmpty(weeklyBucket.Description) ? weeklyBucket.Description : "Weekly Limit Remaining";
+                        item.SecondaryLimit.RemainingPercent = weeklyBucket.RemainingFraction * 100.0;
+                        item.SecondaryLimit.CustomDisplayPercentText = null;
+                        item.SecondaryLimit.ResetTimeText = FormatResetTime(weeklyBucket.ResetTime, "リセット");
+                    }
+                    else
+                    {
+                        item.SecondaryLimit = null;
+                    }
                 }
-                else
+                else if (weeklyBucket != null)
                 {
+                    hasGeminiBuckets = true;
+                    item.PrimaryLimit.Title = "週次制限";
+                    item.PrimaryLimit.LimitDescription = !string.IsNullOrEmpty(weeklyBucket.Description) ? weeklyBucket.Description : "Weekly Limit Remaining";
+                    item.PrimaryLimit.RemainingPercent = weeklyBucket.RemainingFraction * 100.0;
+                    item.PrimaryLimit.CustomDisplayPercentText = null;
+                    item.PrimaryLimit.ResetTimeText = FormatResetTime(weeklyBucket.ResetTime, "リセット");
                     item.SecondaryLimit = null;
                 }
             }
-            else if (weeklyBucket != null)
+
+            if (!hasGeminiBuckets && item.ArgonLimit != null)
             {
-                item.PrimaryLimit.Title = "週次制限";
-                item.PrimaryLimit.LimitDescription = !string.IsNullOrEmpty(weeklyBucket.Description) ? weeklyBucket.Description : "Weekly Limit Remaining";
-                item.PrimaryLimit.RemainingPercent = weeklyBucket.RemainingFraction * 100.0;
+                item.PrimaryLimit.Title = item.ArgonLimit.Title;
+                item.PrimaryLimit.LimitDescription = item.ArgonLimit.LimitDescription;
+                item.PrimaryLimit.RemainingPercent = item.ArgonLimit.RemainingPercent;
                 item.PrimaryLimit.CustomDisplayPercentText = null;
-                item.PrimaryLimit.ResetTimeText = FormatResetTime(weeklyBucket.ResetTime, "リセット");
+                item.PrimaryLimit.ResetTimeText = item.ArgonLimit.ResetTimeText;
                 item.SecondaryLimit = null;
             }
 
             item.CliInfo.IsLoggedIn = !_geminiDataIsStale || CliManagerService.IsAntigravityAuthExists();
             item.CliInfo.IsSubscribed = true;
             item.CliInfo.StatusMessage = "Google DeepMind 連携稼働中";
-            LogOutputReceived?.Invoke($"[Antigravity] クォータ適用完了: 5h枠={item.PrimaryLimit.RemainingPercent:F0}%, 週次枠={item.SecondaryLimit?.RemainingPercent:F0}%");
 
+            var logSummary = item.ArgonLimit != null
+                ? $"Argon枠={item.ArgonLimit.RemainingPercent:F0}%, 5h枠={item.PrimaryLimit.RemainingPercent:F0}%, 週次枠={item.SecondaryLimit?.RemainingPercent:F0}%"
+                : $"5h枠={item.PrimaryLimit.RemainingPercent:F0}%, 週次枠={item.SecondaryLimit?.RemainingPercent:F0}%";
+            LogOutputReceived?.Invoke($"[Antigravity] クォータ適用完了: {logSummary}");
+
+            // 詳細表示・カード切替用の順で格納:
+            // 1. Gemini 4 Argon (週次)
+            // 2. Gemini Model (5時間、週次)
+            // 3. Claude & GPT Model (5時間、週次)
             item.AllLimits.Clear();
-            item.AllLimits.Add(item.PrimaryLimit);
-            if (item.SecondaryLimit != null) item.AllLimits.Add(item.SecondaryLimit);
+            item.LimitGroups.Clear();
+            if (item.ArgonLimit != null)
+            {
+                item.AllLimits.Add(item.ArgonLimit);
+                item.LimitGroups.Add(new UsageLimitGroup
+                {
+                    GroupTitle = "Gemini 4 Argon",
+                    Limits = new System.Collections.ObjectModel.ObservableCollection<UsageLimitInfo> { item.ArgonLimit }
+                });
+            }
+            if (hasGeminiBuckets)
+            {
+                item.AllLimits.Add(item.PrimaryLimit);
+                if (item.SecondaryLimit != null) item.AllLimits.Add(item.SecondaryLimit);
+
+                var geminiGroupLimits = new System.Collections.ObjectModel.ObservableCollection<UsageLimitInfo> { item.PrimaryLimit };
+                if (item.SecondaryLimit != null) geminiGroupLimits.Add(item.SecondaryLimit);
+                item.LimitGroups.Add(new UsageLimitGroup
+                {
+                    GroupTitle = "Gemini Model",
+                    Limits = geminiGroupLimits
+                });
+            }
 
             item.ExternalFiveHourLimit = null;
             item.ExternalWeeklyLimit = null;
             item.HasExternalLimits = false;
 
-            // 外部モデル枠 (Claude / GPT models) があれば詳細画面の内訳枠として追加
+            // 外部モデル枠 (Claude / GPT models) があれば詳細画面の内訳枠および切替枠として追加
             var thirdPartyGroup = groups?.FirstOrDefault(g => 
                 g.DisplayName.Contains("Claude", StringComparison.OrdinalIgnoreCase) || 
                 g.DisplayName.Contains("GPT", StringComparison.OrdinalIgnoreCase) ||
@@ -666,6 +745,7 @@ public class UsageFetcherService
                 var tp5h = thirdPartyGroup.Buckets.FirstOrDefault(b => b.Window == "5h" || b.DisplayName.Contains("Five Hour", StringComparison.OrdinalIgnoreCase));
                 var tpWeekly = thirdPartyGroup.Buckets.FirstOrDefault(b => b.Window == "weekly" || b.DisplayName.Contains("Weekly", StringComparison.OrdinalIgnoreCase));
 
+                var externalGroupLimits = new System.Collections.ObjectModel.ObservableCollection<UsageLimitInfo>();
                 if (tp5h != null)
                 {
                     var limit = new UsageLimitInfo
@@ -676,6 +756,7 @@ public class UsageFetcherService
                         ResetTimeText = FormatResetTime(tp5h.ResetTime, "リセット")
                     };
                     item.AllLimits.Add(limit);
+                    externalGroupLimits.Add(limit);
                     item.ExternalFiveHourLimit = limit;
                 }
                 if (tpWeekly != null)
@@ -688,18 +769,28 @@ public class UsageFetcherService
                         ResetTimeText = FormatResetTime(tpWeekly.ResetTime, "リセット")
                     };
                     item.AllLimits.Add(limit);
+                    externalGroupLimits.Add(limit);
                     item.ExternalWeeklyLimit = limit;
                 }
 
-                // カード上の4枠表示: Gemini 5時間/週次 と 外部 5時間/週次 が揃っている場合のみ
-                item.HasExternalLimits = item.SecondaryLimit != null
-                    && item.ExternalFiveHourLimit != null
+                if (externalGroupLimits.Count > 0)
+                {
+                    item.LimitGroups.Add(new UsageLimitGroup
+                    {
+                        GroupTitle = "Claude & GPT Model",
+                        Limits = externalGroupLimits
+                    });
+                }
+
+                // 外部モデル枠 (5時間＋週次) が揃っている場合のみ切替対象に追加
+                item.HasExternalLimits = item.ExternalFiveHourLimit != null
                     && item.ExternalWeeklyLimit != null;
             }
         }
         else
         {
             // 言語サーバー未接続または未ログイン時（偽のハードコードフォールバックを撤廃）
+            item.ArgonLimit = null;
             item.ExternalFiveHourLimit = null;
             item.ExternalWeeklyLimit = null;
             item.HasExternalLimits = false;
@@ -721,6 +812,7 @@ public class UsageFetcherService
             item.CliInfo.StatusMessage = "Antigravity 接続待機中";
 
             item.AllLimits.Clear();
+            item.LimitGroups.Clear();
             item.AllLimits.Add(item.PrimaryLimit);
             if (item.SecondaryLimit != null) item.AllLimits.Add(item.SecondaryLimit);
         }
@@ -897,17 +989,33 @@ public class UsageFetcherService
             : $"取得元：{source}";
     }
 
+    private static QuotaGroup? FindArgonGroup(List<QuotaGroup>? groups)
+    {
+        return groups?.FirstOrDefault(g =>
+            g.DisplayName.Contains("Argon", StringComparison.OrdinalIgnoreCase) ||
+            g.Buckets.Any(b => b.BucketId.Contains("argon", StringComparison.OrdinalIgnoreCase) ||
+                               b.DisplayName.Contains("Argon", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static QuotaGroup? FindGeminiModelsGroup(List<QuotaGroup>? groups)
+    {
+        return groups?.FirstOrDefault(g =>
+            g.DisplayName.Contains("Gemini", StringComparison.OrdinalIgnoreCase) &&
+            !g.DisplayName.Contains("Argon", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static bool HasUsableGeminiQuota(List<QuotaGroup>? groups)
     {
-        var geminiGroup = groups?.FirstOrDefault(g =>
-            g.DisplayName.Contains("Gemini", StringComparison.OrdinalIgnoreCase));
+        static bool HasUsableBucket(QuotaGroup? group) =>
+            group?.Buckets.Any(b =>
+                double.IsFinite(b.RemainingFraction) &&
+                (b.Window.Equals("5h", StringComparison.OrdinalIgnoreCase) ||
+                 b.Window.Equals("weekly", StringComparison.OrdinalIgnoreCase) ||
+                 b.DisplayName.Contains("Five Hour", StringComparison.OrdinalIgnoreCase) ||
+                 b.DisplayName.Contains("Weekly", StringComparison.OrdinalIgnoreCase) ||
+                 b.DisplayName.Contains("Argon", StringComparison.OrdinalIgnoreCase))) == true;
 
-        return geminiGroup?.Buckets.Any(b =>
-            double.IsFinite(b.RemainingFraction) &&
-            (b.Window.Equals("5h", StringComparison.OrdinalIgnoreCase) ||
-             b.Window.Equals("weekly", StringComparison.OrdinalIgnoreCase) ||
-             b.DisplayName.Contains("Five Hour", StringComparison.OrdinalIgnoreCase) ||
-             b.DisplayName.Contains("Weekly", StringComparison.OrdinalIgnoreCase))) == true;
+        return HasUsableBucket(FindGeminiModelsGroup(groups)) || HasUsableBucket(FindArgonGroup(groups));
     }
 
     private bool IsUsingStaleData(AiServiceType serviceType)

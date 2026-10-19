@@ -109,3 +109,22 @@ public class UsageLimitInfo : ViewModelBase
         UpdateStatusFlags();
     }
 }
+
+public class UsageLimitGroup : ViewModelBase
+{
+    private string _groupTitle = "";
+    private System.Collections.ObjectModel.ObservableCollection<UsageLimitInfo> _limits = new();
+
+    public string GroupTitle
+    {
+        get => _groupTitle;
+        set => SetProperty(ref _groupTitle, value);
+    }
+
+    public System.Collections.ObjectModel.ObservableCollection<UsageLimitInfo> Limits
+    {
+        get => _limits;
+        set => SetProperty(ref _limits, value);
+    }
+}
+
