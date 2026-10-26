@@ -2,6 +2,7 @@ using AIUsageChecker.RegressionTests;
 
 var tests = UsageFetcherRecoveryTests.GetCases().Concat(GrokQuotaClientTests.GetCases())
     .Concat(ClaudeQuotaClientTests.GetCases())
+    .Concat(SubscriptionStatusTests.GetCases())
     .Concat(AntigravityQuotaSourceTests.GetCases())
     .Concat(CardDragDropTests.GetCases())
     .Concat(CliUpdateNotificationTests.GetCases())

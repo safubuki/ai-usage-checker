@@ -4,6 +4,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using AIUsageChecker.Models;
 
@@ -25,6 +26,10 @@ public class CodexQuotaData
     public int ResetCreditsAvailableCount { get; set; }
     public List<ResetCreditInfo> ResetCredits { get; set; } = new();
     public string ErrorMessage { get; set; } = "";
+
+    // plan_type はサーバーが返す現在の契約。不明な場合は未契約と決めつけない。
+    [JsonIgnore]
+    public bool IsSubscribed => !PlanType.Equals("free", StringComparison.OrdinalIgnoreCase);
 }
 
 public class CodexQuotaClient
@@ -120,6 +125,7 @@ public class CodexQuotaClient
             if (root.TryGetProperty("plan_type", out var planElem))
             {
                 result.PlanType = planElem.GetString() ?? "";
+                LogOutputReceived?.Invoke($"[Codex] 契約状況確認: plan_type={(string.IsNullOrEmpty(result.PlanType) ? "なし" : result.PlanType)} → {(result.IsSubscribed ? "契約中" : "未契約 (無料プラン)")}");
             }
 
             // rate_limit 解析

@@ -388,8 +388,11 @@ public class UsageFetcherService
         if (_lastCodexData != null && _lastCodexData.IsSuccess)
         {
             if (!_codexDataIsStale) item.CliInfo.IsLoggedIn = true;
-            item.CliInfo.IsSubscribed = true;
-            item.CliInfo.StatusMessage = $"プラン: {_lastCodexData.PlanType.ToUpper()} (稼働中)";
+            // 契約状況はサーバー応答の plan_type で判定する。無料プランでも利用枠があれば表示する。
+            item.CliInfo.IsSubscribed = _lastCodexData.IsSubscribed;
+            item.CliInfo.StatusMessage = _lastCodexData.IsSubscribed
+                ? $"プラン: {_lastCodexData.PlanType.ToUpper()} (稼働中)"
+                : $"未契約 (無料プラン: {_lastCodexData.PlanType.ToUpper()})";
 
             item.AllLimits.Clear();
 
@@ -573,10 +576,12 @@ public class UsageFetcherService
         else
         {
             // 未契約、未ログイン、または初回の一時的な取得失敗
-            bool isConfigExists = _lastClaudeData?.IsSuccess == true ||
-                (_lastClaudeData?.IsAuthRequired != true && ClaudeQuotaClient.IsConfigExists());
-            bool isTemporaryFailure = isConfigExists && _lastClaudeData?.IsSuccess == false && _lastClaudeData.IsAuthRequired == false;
-            item.CliInfo.IsLoggedIn = isConfigExists && _lastClaudeData?.IsAuthRequired != true;
+            // 未契約はCLI・設定ファイルで確認できた場合だけ表示し、判定前のデータなしは取得待機として扱う。
+            bool isLoggedIn = _lastClaudeData != null
+                ? !_lastClaudeData.IsAuthRequired
+                : ClaudeQuotaClient.IsConfigExists();
+            bool isTemporaryFailure = isLoggedIn && _lastClaudeData?.IsSuccess != true;
+            item.CliInfo.IsLoggedIn = isLoggedIn;
             item.CliInfo.IsSubscribed = isTemporaryFailure;
 
             item.PrimaryLimit.Title = "契約ステータス";
@@ -834,8 +839,10 @@ public class UsageFetcherService
             item.PrimaryLimit.LimitDescription = $"{_lastGrokData.UsedPercent:F0}% 使用済み (残 {_lastGrokData.RemainingPercent:F0}%)";
 
             item.CliInfo.IsLoggedIn = !_lastGrokData.IsFromFallback || GrokQuotaClient.IsAuthFileExists();
-            item.CliInfo.IsSubscribed = true;
-            item.CliInfo.StatusMessage = $"プラン: {_lastGrokData.PlanName} ({_lastGrokData.UsedPercent:F0}% 使用済)";
+            item.CliInfo.IsSubscribed = _lastGrokData.IsSubscribed;
+            item.CliInfo.StatusMessage = _lastGrokData.IsSubscribed
+                ? $"プラン: {_lastGrokData.PlanName} ({_lastGrokData.UsedPercent:F0}% 使用済)"
+                : $"未契約 ({_lastGrokData.PlanName})";
 
             item.SecondaryLimit = null;
             item.AllLimits.Clear();
@@ -920,11 +927,14 @@ public class UsageFetcherService
             item.PrimaryLimit.ResetTimeText = _lastCopilotData.ResetTimeText;
             item.PrimaryLimit.CustomDisplayPercentText = null;
 
+            item.SubTitle = $"GitHub / {_lastCopilotData.PlanName}";
             item.CliInfo.IsLoggedIn = true;
-            item.CliInfo.IsSubscribed = true;
-            item.CliInfo.StatusMessage = string.IsNullOrWhiteSpace(_lastCopilotData.RawResetNotice)
-                ? "プラン: Copilot Pro (稼働中)"
-                : $"プラン: Copilot Pro ({_lastCopilotData.RawResetNotice})";
+            item.CliInfo.IsSubscribed = _lastCopilotData.IsSubscribed;
+            item.CliInfo.StatusMessage = !_lastCopilotData.IsSubscribed
+                ? $"未契約 ({_lastCopilotData.PlanName})"
+                : string.IsNullOrWhiteSpace(_lastCopilotData.RawResetNotice)
+                    ? $"プラン: {_lastCopilotData.PlanName} (稼働中)"
+                    : $"プラン: {_lastCopilotData.PlanName} ({_lastCopilotData.RawResetNotice})";
 
             LogOutputReceived?.Invoke($"[Copilot] 反映完了: {item.PrimaryLimit.Title} {_lastCopilotData.UsedPercent:F0}%使用済み (残{_lastCopilotData.RemainingPercent:F0}%), リセット: {_lastCopilotData.ResetTimeText}");
         }

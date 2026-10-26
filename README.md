@@ -81,8 +81,10 @@
    - **Claude**:
      - **未契約時**: 「未契約」グレーバッジおよび「--」ゲージの単一枠として表示。CLIに更新がある間はバッジを「更新あり」にし、更新完了後に「未契約」に戻します。
      - **契約時（Claude Pro / Max / Team等）**: `~/.claude.json` のクォータ（`five_hour` および `seven_day`）を検知し、**自動的に5時間制限＋週次制限のダブル表示へと昇格・機能**します。
+     - **契約状況の判定**: 取得のたびに `claude auth status --json` の `subscriptionType` を確認し、`~/.claude.json` の `billingType` と合わせて判定します。再契約直後で設定ファイルのプロフィールが古い場合も、CLIで有料プランを確認できれば契約中として利用量を表示します。CLI・設定ファイルのどちらでも有料プランを確認できない場合だけ「未契約」とし、判定できなかった場合は未契約にせず取得エラーとして再試行します。
    - **Gemini**: 5時間制限 ＋ 週次制限（Google DeepMind Antigravity CLI `agy` を優先し、取得失敗時は起動中のAntigravity IDEの言語サーバーから補助取得。詳細画面に実際の取得元を表示）
    - **Grok**: SuperGrok Weekly limit（週次単一制限）
+   - **契約状況の判定（Claude以外）**: GPTは利用量APIの `plan_type`、Copilotは `gh api /copilot_internal/user` の `copilot_plan` / `access_type_sku`、Grokは課金APIの `subscriptionTier` で判定し、無料プランの場合は「未契約」と表示します（利用枠が返る場合は残量も表示）。プラン情報が応答に含まれない場合は未契約と決めつけません。Antigravityは契約プランを返すCLIコマンドがないため、利用枠を取得できれば利用可能として表示します。
    - **GitHub Copilot**:
      - **年間契約（維持環境等）**: **「プレミアム要求」**（単位: 要求/回、例: `2% 使用済み (残 294 / 300)`）として正確に表示。
      - **一般・月間契約等**: **「AI Credits」**（単位: Credits、例: `{used}% 使用済み (残 {remaining} / {total} Credits)`）として自動判定・表示。
@@ -104,7 +106,7 @@
 | サービス名 | 対象CLI / プロバイダ | 制限体系 | 取得方式 |
 |---|---|---|---|
 | **GPT** | OpenAI Codex (`codex`) | プラン動的判定<br>・Plus等: 5時間制限 + 週次制限 + 予備枠<br>・Pro等: 週次制限のみ（自動判定）<br>・リセット権（チケット保有数 & 有効期限） | Codex認証トークン経由 生API直接取得 (`/wham/rate-limit-reset-credits`) |
-| **Claude** | Anthropic (`claude`) | 契約時: 5時間制限 + 週次制限<br>未契約時: 契約ステータス | `~/.claude.json` / Claude CLI 連携 |
+| **Claude** | Anthropic (`claude`) | 契約時: 5時間制限 + 週次制限<br>未契約時: 契約ステータス | 契約判定: `claude auth status --json` + `~/.claude.json`<br>利用量: `~/.claude.json` |
 | **Gemini** | Google DeepMind (Antigravity CLI: `agy` / IDE) | 5時間制限 + 週次制限（外部モデル枠対応） | CLI (`agy -p "/usage"`) を優先し、取得失敗時は起動中IDEの言語サーバーから補助取得。詳細画面に取得元を表示 |
 | **Grok** | xAI (`grok`) | 週次制限 (SuperGrok) | Grok CLI / 利用状況判定 |
 | **Copilot** | GitHub Copilot (`copilot`) | 契約形態自動判定<br>・年間契約: プレミアム要求 (要求/回)<br>・一般/月間: AI Credits (Credits) | GitHub CLI (`gh api`) 直接連携 |

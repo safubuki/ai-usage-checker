@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace AIUsageChecker.Services;
@@ -28,6 +29,12 @@ public class GrokQuotaData
     public string ErrorMessage { get; set; } = "";
     public bool IsFromFallback { get; set; }
     public DateTime? SourceTimestamp { get; set; }
+
+    // subscriptionTier が無料・なしを示す場合だけ未契約。応答に含まれない場合は従来どおり契約中とみなす。
+    [JsonIgnore]
+    public bool IsSubscribed =>
+        !PlanName.Contains("free", StringComparison.OrdinalIgnoreCase) &&
+        !PlanName.Equals("none", StringComparison.OrdinalIgnoreCase);
 }
 
 public class GrokProductUsage
@@ -246,6 +253,7 @@ public class GrokQuotaClient
             if (configElem.TryGetProperty("subscriptionTier", out var stElem))
             {
                 result.PlanName = stElem.GetString() ?? "SuperGrok";
+                LogOutputReceived?.Invoke($"[Grok] 契約状況確認: subscriptionTier={result.PlanName} → {(result.IsSubscribed ? "契約中" : "未契約")}");
             }
 
             // 期間とリセット日時

@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace AIUsageChecker.Services;
@@ -19,6 +20,14 @@ public class CopilotQuotaData
     public int TotalCount { get; set; }
     public string ResetTimeText { get; set; } = "";
     public string RawResetNotice { get; set; } = "";
+    public string CopilotPlan { get; set; } = "";
+    public string AccessTypeSku { get; set; } = "";
+
+    // copilot_plan / access_type_sku が無料プランを示す場合だけ未契約。旧キャッシュなど情報がない場合は契約中とみなす。
+    [JsonIgnore]
+    public bool IsSubscribed =>
+        !CopilotPlan.Equals("free", StringComparison.OrdinalIgnoreCase) &&
+        !AccessTypeSku.Contains("free", StringComparison.OrdinalIgnoreCase);
 }
 
 public class CopilotQuotaClient
@@ -109,6 +118,12 @@ public class CopilotQuotaClient
             string accessType = root.TryGetProperty("access_type_sku", out var atElem) ? (atElem.GetString() ?? "") : "";
             bool isYearly = accessType.Contains("yearly", StringComparison.OrdinalIgnoreCase);
             data.IsYearlySubscriber = isYearly;
+            data.AccessTypeSku = accessType;
+            data.CopilotPlan = root.TryGetProperty("copilot_plan", out var cpElem) && cpElem.ValueKind == JsonValueKind.String
+                ? cpElem.GetString() ?? ""
+                : "";
+            data.PlanName = GetPlanName(data);
+            LogOutputReceived?.Invoke($"[Copilot] 契約状況確認: copilot_plan={(string.IsNullOrEmpty(data.CopilotPlan) ? "なし" : data.CopilotPlan)}, access_type_sku={(string.IsNullOrEmpty(accessType) ? "なし" : accessType)} → {(data.IsSubscribed ? $"契約中 ({data.PlanName})" : "未契約 (無料プラン)")}");
 
             // 年間契約者（ユーザー様環境）: 「プレミアム要求」 / 単位: プレミアムリクエスト (要求/回)
             // そうではない人 (月間、従量制等): 「AI Credits」 / 単位: Credits (クレジット)
@@ -199,5 +214,13 @@ public class CopilotQuotaClient
             LogOutputReceived?.Invoke($"[Copilot] 例外発生: {ex.Message}");
             return null;
         }
+    }
+
+    private static string GetPlanName(CopilotQuotaData data)
+    {
+        if (!data.IsSubscribed) return "Copilot Free";
+        if (data.CopilotPlan.Contains("enterprise", StringComparison.OrdinalIgnoreCase)) return "Copilot Enterprise";
+        if (data.CopilotPlan.Contains("business", StringComparison.OrdinalIgnoreCase)) return "Copilot Business";
+        return "Copilot Pro";
     }
 }
