@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using System.Xml.Linq;
+using AIUsageChecker.Controls;
 using AIUsageChecker.Models;
 using AIUsageChecker.ViewModels;
 using AIUsageChecker.Views;
@@ -201,6 +202,8 @@ internal static class DetailViewChecks
             Console.WriteLine($"成功: 詳細画面: {name}の認証条件、短いラベル、共通ボタン寸法");
         }
 
+        AssertUsageBreakdownStackedBar(view);
+
         // 同じ STA と安全に読み込んだ共有 Resources をカード操作の検証でも使う。
         AssertAntigravityCardAndDetailModes(view);
         CardDragDropTests.RunOnStaThread();
@@ -376,6 +379,55 @@ internal static class DetailViewChecks
         }
         SaveImage(detailView, "detail-antigravity-argon.png");
         Console.WriteLine("成功: Antigravity: Gemini 4 Argon / Gemini Model / Claude & GPT Model のカード3段階切替と詳細3グループ枠表示");
+    }
+
+    private static void AssertUsageBreakdownStackedBar(DetailPopupView view)
+    {
+        var item = CreateItem(AiServiceType.Grok, "Grok", "grok");
+        item.CliInfo.HasUpdate = false;
+        item.PrimaryLimit.RemainingPercent = 70;
+        item.PrimaryLimit.LimitDescription = "30% 使用済み (残 70%)";
+        var segments = new[] { ("Grok Build", 13.0, "#34D399"), ("チャット", 9.0, "#60A5FA"), ("Imagine", 8.0, "#F472B6") };
+        foreach (var (title, used, color) in segments)
+            item.UsageBreakdown.Add(new UsageLimitInfo { Title = title, UsedAmount = used, SegmentColor = color });
+        view.DataContext = new DetailTestContext(item);
+        Arrange(view);
+
+        var bar = view.FindName("UsageBreakdownBar") as ItemsControl
+            ?? throw new InvalidOperationException("Grok: 内訳の積み上げバーが見つかりません。");
+        var panel = Descendants<StackedBarPanel>(bar).Single();
+        var parts = panel.Children.OfType<FrameworkElement>().ToArray();
+        Check.Equal(segments.Length, parts.Length, "Grok: 内訳を1本のバーの区間として表示していません");
+        Check.True(panel.ActualWidth > 0, "Grok: 内訳バーを配置できませんでした");
+        double x = 0;
+        for (int i = 0; i < segments.Length; i++)
+        {
+            var offset = parts[i].TranslatePoint(new Point(0, 0), panel).X;
+            Check.True(Math.Abs(offset - x) < 0.5, $"Grok: {segments[i].Item1}の区間が前の区間の続きに並んでいません");
+            Check.True(Math.Abs(parts[i].ActualWidth - panel.ActualWidth * segments[i].Item2 / 100) < 0.5,
+                $"Grok: {segments[i].Item1}の区間幅が使用率に比例していません");
+            var segmentBorder = Descendants<Border>(parts[i]).First();
+            Check.Equal(segments[i].Item3, ((SolidColorBrush)segmentBorder.Background).Color.ToString().Replace("#FF", "#"),
+                $"Grok: {segments[i].Item1}の色が凡例と一致しません");
+            x += parts[i].ActualWidth;
+        }
+        Check.True(Math.Abs(x - panel.ActualWidth * 0.30) < 1, "Grok: 内訳の合計がバー全体の使用率と一致しません");
+
+        var legend = view.FindName("UsageBreakdownLegend") as ItemsControl
+            ?? throw new InvalidOperationException("Grok: 内訳の凡例が見つかりません。");
+        var legendTexts = Descendants<TextBlock>(legend).Select(t => t.Text).ToArray();
+        foreach (var (title, used, _) in segments)
+        {
+            Check.True(legendTexts.Contains(title) && legendTexts.Contains($"{used:F0}%"), $"Grok: 凡例に{title}の使用率がありません");
+        }
+
+        var total = view.FindName("UsageBreakdownTotalText") as TextBlock
+            ?? throw new InvalidOperationException("Grok: 内訳の合計表示が見つかりません。");
+        var totalText = string.Concat(total.Inlines.OfType<System.Windows.Documents.Run>().Select(r => r.Text));
+        Check.Equal("合計 30% 使用済み (残 70%)", totalText, "Grok: 内訳の合計使用量を表示していません");
+
+        SaveImage(view, "detail-grok-breakdown.png");
+        Console.WriteLine("成功: 詳細画面: Grokの内訳を1本の積み上げバーと凡例・合計で表示");
     }
 
     private static ResourceDictionary LoadApplicationResources()

@@ -199,8 +199,9 @@
                                 </ItemsControl.Style>
                             </ItemsControl>
 
-                            <!-- Grok 等の主制限を消費した機能別内訳。独立した残量リングにはしない。 -->
-                            <Border Background="#0F1413"
+                            <!-- Grok 等の主制限を消費した機能別内訳。独立した残量リングにはせず、1本の積み上げ横棒で合計と内訳を示す。 -->
+                            <Border x:Name="UsageBreakdownPanel"
+                                    Background="#0F1413"
                                     BorderBrush="#26342E"
                                     BorderThickness="1"
                                     CornerRadius="6"
@@ -210,40 +211,77 @@
                                 <StackPanel>
                                     <Grid Margin="0,0,0,5">
                                         <TextBlock Text="週次枠の内訳" FontSize="9.5" FontWeight="SemiBold" Foreground="#9CA3AF"/>
-                                        <TextBlock Text="使用率" FontSize="8.5" Foreground="#6B7280" HorizontalAlignment="Right"/>
+                                        <TextBlock x:Name="UsageBreakdownTotalText"
+                                                   FontSize="9.5"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#F3F4F6"
+                                                   HorizontalAlignment="Right">
+                                            <Run Text="合計 " FontWeight="Normal" Foreground="#9CA3AF"/><Run Text="{Binding SelectedItem.PrimaryLimit.LimitDescription, Mode=OneWay}"/>
+                                        </TextBlock>
                                     </Grid>
-                                    <ItemsControl ItemsSource="{Binding SelectedItem.UsageBreakdown}">
+
+                                    <!-- 積み上げ横棒: 各機能の使用率を色分けし、空き部分が残量 -->
+                                    <Border Height="10"
+                                            CornerRadius="3"
+                                            Background="#29302E"
+                                            ClipToBounds="True">
+                                        <ItemsControl x:Name="UsageBreakdownBar"
+                                                      ItemsSource="{Binding SelectedItem.UsageBreakdown}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <controls:StackedBarPanel/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemContainerStyle>
+                                                <Style TargetType="ContentPresenter">
+                                                    <Setter Property="controls:StackedBarPanel.Percent" Value="{Binding UsedAmount}"/>
+                                                </Style>
+                                            </ItemsControl.ItemContainerStyle>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="{Binding SegmentColor}"
+                                                            BorderBrush="#0F1413"
+                                                            BorderThickness="0,0,1,0">
+                                                        <Border.ToolTip>
+                                                            <TextBlock>
+                                                                <Run Text="{Binding Title, Mode=OneWay}"/><Run Text=" "/><Run Text="{Binding UsedAmount, Mode=OneWay, StringFormat={}{0:F0}%}"/>
+                                                            </TextBlock>
+                                                        </Border.ToolTip>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </Border>
+
+                                    <!-- 凡例 -->
+                                    <ItemsControl x:Name="UsageBreakdownLegend"
+                                                  ItemsSource="{Binding SelectedItem.UsageBreakdown}"
+                                                  Margin="0,6,0,0">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel Orientation="Horizontal"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Grid Margin="0,2,0,3">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="90"/>
-                                                        <ColumnDefinition Width="*"/>
-                                                        <ColumnDefinition Width="52"/>
-                                                    </Grid.ColumnDefinitions>
+                                                <StackPanel Orientation="Horizontal" Margin="0,0,12,2">
+                                                    <Border Width="8"
+                                                            Height="8"
+                                                            CornerRadius="2"
+                                                            Background="{Binding SegmentColor}"
+                                                            VerticalAlignment="Center"
+                                                            Margin="0,0,4,0"/>
                                                     <TextBlock Text="{Binding Title}"
                                                                FontSize="9.5"
                                                                Foreground="#D1D5DB"
-                                                               VerticalAlignment="Center"
-                                                               TextTrimming="CharacterEllipsis"
-                                                               Margin="0,0,8,0"/>
-                                                    <ProgressBar Grid.Column="1"
-                                                                 Height="7"
-                                                                 Minimum="0"
-                                                                 Maximum="100"
-                                                                 Value="{Binding UsedAmount}"
-                                                                 Foreground="#3F9F75"
-                                                                 Background="#29302E"
-                                                                 BorderThickness="0"
-                                                                 VerticalAlignment="Center"/>
-                                                    <TextBlock Grid.Column="2"
-                                                               Text="{Binding UsedAmount, StringFormat={}{0:F0}% 使用}"
+                                                               VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding UsedAmount, StringFormat={}{0:F0}%}"
                                                                FontSize="9.5"
                                                                FontWeight="SemiBold"
                                                                Foreground="#F3F4F6"
-                                                               HorizontalAlignment="Right"
-                                                               VerticalAlignment="Center"/>
-                                                </Grid>
+                                                               VerticalAlignment="Center"
+                                                               Margin="4,0,0,0"/>
+                                                </StackPanel>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>

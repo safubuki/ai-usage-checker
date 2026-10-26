@@ -10,6 +10,7 @@ public class UsageLimitInfo : ViewModelBase
     private double _usedAmount;
     private double _totalLimit;
     private string _unit = "%";
+    private string _segmentColor = "#3F9F75";
     private string _resetTimeText = "";
     private bool _isWarning;
     private bool _isCritical;
@@ -73,6 +74,13 @@ public class UsageLimitInfo : ViewModelBase
     {
         get => _unit;
         set => SetProperty(ref _unit, value);
+    }
+
+    // 内訳の積み上げグラフと凡例で使う色
+    public string SegmentColor
+    {
+        get => _segmentColor;
+        set => SetProperty(ref _segmentColor, value);
     }
 
     public string ResetTimeText

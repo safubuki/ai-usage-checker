@@ -40,6 +40,7 @@ internal static class SubscriptionStatusTests
         yield return new("Copilot契約: copilot_plan=individual は契約中", () => CopilotPlanAsync("individual", "yearly_subscriber_quota", true));
         yield return new("Grok契約: subscriptionTier=Free は未契約", () => GrokPlanAsync("Free", false));
         yield return new("Grok契約: subscriptionTier=SuperGrok は契約中", () => GrokPlanAsync("SuperGrok", true));
+        yield return new("Grok内訳: 機能ごとに固定色を割り当て、合計に届かない分はその他で補う", GrokBreakdownSegmentsAsync);
     }
 
     private static Task<ClaudeQuotaData> FetchClaudeAsync(string configPath, string? cliJson)
@@ -358,6 +359,34 @@ internal static class SubscriptionStatusTests
         var item = CreateItem(AiServiceType.Grok);
         await fetcher.FetchUsageAsync(item);
         CheckPlan(item, expectedSubscribed);
+    }
+
+    private static async Task GrokBreakdownSegmentsAsync()
+    {
+        using var temp = new TemporaryDirectory();
+        var fetcher = new PlanFetcher(temp.FilePath("cache.json"))
+        {
+            Grok = new GrokQuotaData
+            {
+                IsSuccess = true, PlanName = "SuperGrok", UsedPercent = 32, RemainingPercent = 68,
+                ProductUsage =
+                [
+                    new GrokProductUsage { Product = "GrokChat", DisplayName = "チャット", UsedPercent = 9 },
+                    new GrokProductUsage { Product = "GrokBuild", DisplayName = "Grok Build", UsedPercent = 13 },
+                    new GrokProductUsage { Product = "GrokImagine", DisplayName = "Imagine", UsedPercent = 8 }
+                ]
+            }
+        };
+        var item = CreateItem(AiServiceType.Grok);
+        await fetcher.FetchUsageAsync(item);
+
+        var segments = item.UsageBreakdown.Select(s => (s.Title, s.UsedAmount, s.SegmentColor)).ToArray();
+        Check.Equal(4, segments.Length, "内訳の合計と使用率の差を示していません");
+        Check.Equal(("チャット", 9.0, "#60A5FA"), segments[0], "チャットの色が取得順で変わっています");
+        Check.Equal(("Grok Build", 13.0, "#34D399"), segments[1], "Grok Build の色が取得順で変わっています");
+        Check.Equal(("Imagine", 8.0, "#F472B6"), segments[2], "Imagine の色が正しくありません");
+        Check.Equal(("その他", 2.0, "#9CA3AF"), segments[3], "合計に届かない分をその他として表示していません");
+        Check.Equal(32.0, segments.Sum(s => s.UsedAmount), "内訳の合計が週次の使用率と一致しません");
     }
 
     private static void CheckPlan(AiUsageItem item, bool expectedSubscribed)

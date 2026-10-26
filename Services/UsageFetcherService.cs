@@ -898,13 +898,32 @@ public class UsageFetcherService
                 }
             }
 
+            // 内訳は週次枠の使用率を機能別に分けたもの。1本の積み上げグラフで表示するため色を割り当てる。
+            int paletteIndex = 0;
+            double breakdownTotal = 0;
             foreach (var product in productUsage)
             {
+                double used = Math.Clamp(product.UsedPercent, 0.0, 100.0);
+                breakdownTotal += used;
                 item.UsageBreakdown.Add(new UsageLimitInfo
                 {
                     Title = product.DisplayName,
-                    UsedAmount = Math.Clamp(product.UsedPercent, 0.0, 100.0),
-                    LimitDescription = "週次使用量の内訳"
+                    UsedAmount = used,
+                    LimitDescription = "週次使用量の内訳",
+                    SegmentColor = GetBreakdownColor(product.Product, ref paletteIndex)
+                });
+            }
+
+            // 内訳の合計が週次の使用率に届かない分は「その他」として示し、バー全体を使用率と一致させる。
+            double unassigned = _lastGrokData.UsedPercent - breakdownTotal;
+            if (item.UsageBreakdown.Count > 0 && unassigned >= 1.0)
+            {
+                item.UsageBreakdown.Add(new UsageLimitInfo
+                {
+                    Title = "その他",
+                    UsedAmount = unassigned,
+                    LimitDescription = "週次使用量の内訳",
+                    SegmentColor = OtherBreakdownColor
                 });
             }
 
@@ -931,6 +950,21 @@ public class UsageFetcherService
             item.AllLimits.Add(item.PrimaryLimit);
             item.UsageBreakdown.Clear();
         }
+    }
+
+    private const string OtherBreakdownColor = "#9CA3AF";
+    private static readonly string[] BreakdownPalette = ["#FBBF24", "#A78BFA", "#22D3EE", "#FB923C"];
+
+    private static string GetBreakdownColor(string product, ref int paletteIndex)
+    {
+        // 主要機能は取得順に関係なく同じ色にし、その他の機能は順に割り当てる。
+        return product.ToLowerInvariant() switch
+        {
+            "grokbuild" => "#34D399",
+            "grokchat" => "#60A5FA",
+            "grokimagine" or "grokimage" or "imagine" or "image" => "#F472B6",
+            _ => BreakdownPalette[paletteIndex++ % BreakdownPalette.Length]
+        };
     }
 
     private void ApplyCopilotQuota(AiUsageItem item)
