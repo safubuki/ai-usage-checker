@@ -2,6 +2,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using AIUsageChecker.Models;
 using AIUsageChecker.Services;
 
@@ -26,9 +27,13 @@ internal static class SubscriptionStatusTests
         yield return new("Claude契約: CLIの結果が不正なら設定ファイルで判定", InvalidCliOutputAsync);
         yield return new("Claude契約: 判定前のデータなしを未契約と表示しない", ClaudeNoDataIsNotUnsubscribedAsync);
         yield return new("Claude利用量: 利用量APIの最新値を保存値より優先", LiveUsageOverridesSavedAsync);
-        yield return new("Claude利用量: 利用量APIの失敗時は保存値を表示", () => LiveUsageFailureFallsBackAsync(HttpStatusCode.Unauthorized));
+        yield return new("Claude利用量: 利用量APIの失敗時は保存値を表示", () => LiveUsageFailureFallsBackAsync(HttpStatusCode.InternalServerError));
         yield return new("Claude利用量: 利用量APIの通信エラー時は保存値を表示", () => LiveUsageFailureFallsBackAsync(null));
-        yield return new("Claude利用量: トークン期限切れならAPIを呼ばず保存値を表示", ExpiredTokenSkipsLiveUsageAsync);
+        yield return new("Claude利用量: トークン期限切れならClaude Codeと同じ手順で更新して最新値を取得", ExpiredTokenRefreshAsync);
+        yield return new("Claude利用量: 利用量APIの認証エラー時は1回だけトークンを更新して再試行", UnauthorizedUsageRefreshesOnceAsync);
+        yield return new("Claude利用量: Claude Codeが更新中(ロック中)なら更新せず保存値を表示", RefreshLockHeldAsync);
+        yield return new("Claude利用量: トークン更新が拒否されたら認証情報を変えず保存値を表示", RefreshRejectedAsync);
+        yield return new("Claude利用量: 保存値は前回取得時刻付きで表示", SavedValueShownAsPreviousAsync);
         yield return new("GPT契約: plan_type=free は未契約、利用枠は表示", () => GptPlanAsync("free", false));
         yield return new("GPT契約: plan_type=plus は契約中", () => GptPlanAsync("plus", true));
         yield return new("Copilot契約: copilot_plan=free は未契約", () => CopilotPlanAsync("free", "free_limited_copilot", false));
@@ -119,76 +124,194 @@ internal static class SubscriptionStatusTests
          "seven_day":{"utilization":8,"resets_at":"2026-10-30T10:00:00Z"}}
         """;
 
+    private const string TokenResponseJson = """
+        {"access_token":"new-access-token","refresh_token":"new-refresh-token","expires_in":28800,
+         "scope":"user:profile user:inference"}
+        """;
+
     private static async Task<(TemporaryDirectory Temp, string ConfigPath, string CredentialsPath)> CreateClaudeFilesAsync(DateTimeOffset tokenExpiresAt)
     {
         var temp = new TemporaryDirectory();
         var configPath = temp.FilePath("claude.json");
         var credentialsPath = temp.FilePath("credentials.json");
         await File.WriteAllTextAsync(configPath, SubscribedConfig);
-        await File.WriteAllTextAsync(credentialsPath,
-            $$$"""{"claudeAiOauth":{"accessToken":"dummy-access-token","expiresAt":{{{tokenExpiresAt.ToUnixTimeMilliseconds()}}}}}""");
+        await File.WriteAllTextAsync(credentialsPath, $$$"""
+            {"claudeAiOauth":{"accessToken":"dummy-access-token","refreshToken":"dummy-refresh-token",
+              "expiresAt":{{{tokenExpiresAt.ToUnixTimeMilliseconds()}}},"scopes":["user:inference","user:profile","user:plugins"],
+              "subscriptionType":"pro","rateLimitTier":"default_claude_ai"},
+             "otherSetting":{"keep":true}}
+            """);
         return (temp, configPath, credentialsPath);
+    }
+
+    private static Task<ClaudeQuotaData> FetchClaudeWithHttpAsync(HttpMessageHandler handler, string configPath, string credentialsPath)
+    {
+        var client = new ClaudeQuotaClient(new HttpClient(handler)) { LockRetryDelay = TimeSpan.FromMilliseconds(10) };
+        return client.FetchClaudeQuotaAsync(configPath, null, credentialsPath);
+    }
+
+    private static void CheckLiveUsage(ClaudeQuotaData result)
+    {
+        Check.True(result.IsSuccess && result.IsSubscribed && !result.IsSavedValue, "利用量APIの最新値で契約中と判定していません");
+        Check.Equal(86.0, result.FiveHourRemainingPercent, "5時間枠に最新値を反映していません");
+        Check.Equal(92.0, result.WeeklyRemainingPercent, "週次枠に最新値を反映していません");
+        Check.True(result.FiveHourResetText.Contains("リセット", StringComparison.Ordinal), "5時間枠のリセット時刻を表示していません");
+    }
+
+    private static void CheckSavedUsage(ClaudeQuotaData result)
+    {
+        Check.True(result.IsSuccess && result.IsSubscribed && !result.IsAuthRequired,
+            "利用量APIの失敗を認証エラーまたは未契約として扱っています");
+        Check.True(result.IsSavedValue && result.SavedAt.HasValue, "保存値を使ったことと保存時刻を返していません");
+        Check.Equal(94.0, result.WeeklyRemainingPercent, "保存された利用枠を表示していません");
+        Check.Equal("未使用", result.FiveHourResetText, "未使用の5時間枠を案内していません");
+    }
+
+    private static async Task CheckCredentialsUnchangedAsync(string credentialsPath)
+    {
+        var json = await File.ReadAllTextAsync(credentialsPath);
+        Check.True(json.Contains("dummy-access-token", StringComparison.Ordinal) &&
+            json.Contains("dummy-refresh-token", StringComparison.Ordinal), "更新に失敗したのに認証情報を書き換えました");
     }
 
     private static async Task LiveUsageOverridesSavedAsync()
     {
         var (temp, configPath, credentialsPath) = await CreateClaudeFilesAsync(DateTimeOffset.UtcNow.AddHours(1));
         using var _ = temp;
-        using var handler = new UsageApiHandler(HttpStatusCode.OK, LiveUsageJson);
-        using var http = new HttpClient(handler);
-        var result = await new ClaudeQuotaClient(http).FetchClaudeQuotaAsync(configPath, null, credentialsPath);
-        Check.Equal(1, handler.RequestCount, "利用量APIを呼び出していません");
-        Check.Equal("dummy-access-token", handler.BearerToken, "認証情報のトークンを使っていません");
-        Check.True(handler.HasBetaHeader, "利用量APIに必要なヘッダーがありません");
-        Check.True(result.IsSuccess && result.IsSubscribed, "最新値の取得後に契約中と判定していません");
-        Check.Equal(86.0, result.FiveHourRemainingPercent, "5時間枠に最新値を反映していません");
-        Check.Equal(92.0, result.WeeklyRemainingPercent, "週次枠に最新値を反映していません");
-        Check.True(result.FiveHourResetText.Contains("リセット", StringComparison.Ordinal), "5時間枠のリセット時刻を表示していません");
+        using var handler = new ClaudeApiHandler([ClaudeApiHandler.Usage(HttpStatusCode.OK, LiveUsageJson)]);
+        CheckLiveUsage(await FetchClaudeWithHttpAsync(handler, configPath, credentialsPath));
+        handler.CheckCompleted();
+        Check.Equal("dummy-access-token", handler.Requests[0].BearerToken, "認証情報のトークンを使っていません");
+        Check.True(handler.Requests[0].HasBetaHeader, "利用量APIに必要なヘッダーがありません");
+        await CheckCredentialsUnchangedAsync(credentialsPath);
     }
 
     private static async Task LiveUsageFailureFallsBackAsync(HttpStatusCode? status)
     {
         var (temp, configPath, credentialsPath) = await CreateClaudeFilesAsync(DateTimeOffset.UtcNow.AddHours(1));
         using var _ = temp;
-        using var handler = new UsageApiHandler(status, "{}");
-        using var http = new HttpClient(handler);
-        var result = await new ClaudeQuotaClient(http).FetchClaudeQuotaAsync(configPath, null, credentialsPath);
-        Check.Equal(1, handler.RequestCount, "利用量APIを呼び出していません");
-        Check.True(result.IsSuccess && result.IsSubscribed && !result.IsAuthRequired,
-            "利用量APIの失敗を認証エラーまたは未契約として扱っています");
-        Check.Equal(94.0, result.WeeklyRemainingPercent, "保存された利用枠を表示していません");
-        Check.Equal("未使用", result.FiveHourResetText, "未使用の5時間枠を案内していません");
+        using var handler = new ClaudeApiHandler([ClaudeApiHandler.Usage(status, "{}")]);
+        CheckSavedUsage(await FetchClaudeWithHttpAsync(handler, configPath, credentialsPath));
+        handler.CheckCompleted();
     }
 
-    private static async Task ExpiredTokenSkipsLiveUsageAsync()
+    private static async Task ExpiredTokenRefreshAsync()
     {
         var (temp, configPath, credentialsPath) = await CreateClaudeFilesAsync(DateTimeOffset.UtcNow.AddMinutes(-5));
         using var _ = temp;
-        using var handler = new UsageApiHandler(HttpStatusCode.OK, LiveUsageJson);
-        using var http = new HttpClient(handler);
-        var result = await new ClaudeQuotaClient(http).FetchClaudeQuotaAsync(configPath, null, credentialsPath);
-        Check.Equal(0, handler.RequestCount, "期限切れトークンで利用量APIを呼び出しています");
-        Check.True(result.IsSuccess && result.IsSubscribed, "保存値で契約中と判定していません");
-        Check.Equal(94.0, result.WeeklyRemainingPercent, "保存された利用枠を表示していません");
+        using var handler = new ClaudeApiHandler([
+            ClaudeApiHandler.Token(HttpStatusCode.OK, TokenResponseJson),
+            ClaudeApiHandler.Usage(HttpStatusCode.OK, LiveUsageJson)]);
+        CheckLiveUsage(await FetchClaudeWithHttpAsync(handler, configPath, credentialsPath));
+        handler.CheckCompleted();
+
+        var body = handler.Requests[0].Body;
+        Check.True(body.Contains("\"grant_type\":\"refresh_token\"", StringComparison.Ordinal) &&
+            body.Contains("\"refresh_token\":\"dummy-refresh-token\"", StringComparison.Ordinal) &&
+            body.Contains("\"client_id\":\"9d1c250a-e61b-44d9-88ed-5944d1962f5e\"", StringComparison.Ordinal) &&
+            body.Contains("\"scope\":\"user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload\"", StringComparison.Ordinal),
+            "Claude Code と同じ内容でトークン更新を要求していません");
+        Check.Equal("new-access-token", handler.Requests[1].BearerToken, "更新後のトークンで利用量を取得していません");
+
+        using var saved = JsonDocument.Parse(await File.ReadAllTextAsync(credentialsPath));
+        var oauth = saved.RootElement.GetProperty("claudeAiOauth");
+        Check.Equal("new-access-token", oauth.GetProperty("accessToken").GetString(), "新しいアクセストークンを保存していません");
+        Check.Equal("new-refresh-token", oauth.GetProperty("refreshToken").GetString(), "新しいリフレッシュトークンを保存していません");
+        Check.True(DateTimeOffset.FromUnixTimeMilliseconds(oauth.GetProperty("expiresAt").GetInt64()) > DateTimeOffset.UtcNow.AddHours(7),
+            "新しい有効期限を保存していません");
+        Check.Equal("pro", oauth.GetProperty("subscriptionType").GetString(), "契約種別を保持していません");
+        Check.Equal("default_claude_ai", oauth.GetProperty("rateLimitTier").GetString(), "レート制限区分を保持していません");
+        Check.True(saved.RootElement.GetProperty("otherSetting").GetProperty("keep").GetBoolean(), "他の設定を保持していません");
+        Check.True(!Directory.Exists(Path.Combine(temp.Path, ".oauth_refresh.lock")), "更新後にロックを解放していません");
     }
 
-    private sealed class UsageApiHandler(HttpStatusCode? status, string json) : HttpMessageHandler
+    private static async Task UnauthorizedUsageRefreshesOnceAsync()
     {
-        public int RequestCount { get; private set; }
-        public string? BearerToken { get; private set; }
-        public bool HasBetaHeader { get; private set; }
+        var (temp, configPath, credentialsPath) = await CreateClaudeFilesAsync(DateTimeOffset.UtcNow.AddHours(1));
+        using var _ = temp;
+        using var handler = new ClaudeApiHandler([
+            ClaudeApiHandler.Usage(HttpStatusCode.Unauthorized, "{}"),
+            ClaudeApiHandler.Token(HttpStatusCode.OK, TokenResponseJson),
+            ClaudeApiHandler.Usage(HttpStatusCode.OK, LiveUsageJson)]);
+        CheckLiveUsage(await FetchClaudeWithHttpAsync(handler, configPath, credentialsPath));
+        handler.CheckCompleted();
+        Check.Equal("new-access-token", handler.Requests[2].BearerToken, "更新後のトークンで再試行していません");
+    }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    private static async Task RefreshLockHeldAsync()
+    {
+        var (temp, configPath, credentialsPath) = await CreateClaudeFilesAsync(DateTimeOffset.UtcNow.AddMinutes(-5));
+        using var _ = temp;
+        var lockPath = Path.Combine(temp.Path, ".oauth_refresh.lock");
+        Directory.CreateDirectory(lockPath);
+        using var handler = new ClaudeApiHandler([]);
+        CheckSavedUsage(await FetchClaudeWithHttpAsync(handler, configPath, credentialsPath));
+        handler.CheckCompleted();
+        await CheckCredentialsUnchangedAsync(credentialsPath);
+        Check.True(Directory.Exists(lockPath), "他プロセスのロックを削除しました");
+    }
+
+    private static async Task RefreshRejectedAsync()
+    {
+        var (temp, configPath, credentialsPath) = await CreateClaudeFilesAsync(DateTimeOffset.UtcNow.AddMinutes(-5));
+        using var _ = temp;
+        using var handler = new ClaudeApiHandler([
+            ClaudeApiHandler.Token(HttpStatusCode.BadRequest, """{"error":"invalid_grant"}""")]);
+        CheckSavedUsage(await FetchClaudeWithHttpAsync(handler, configPath, credentialsPath));
+        handler.CheckCompleted();
+        await CheckCredentialsUnchangedAsync(credentialsPath);
+        Check.True(!Directory.Exists(Path.Combine(temp.Path, ".oauth_refresh.lock")), "更新失敗後にロックを解放していません");
+    }
+
+    private static async Task SavedValueShownAsPreviousAsync()
+    {
+        using var temp = new TemporaryDirectory();
+        var savedAt = new DateTime(2026, 10, 26, 8, 58, 0);
+        var fetcher = new PlanFetcher(temp.FilePath("cache.json"))
         {
-            RequestCount++;
-            Check.Equal("/api/oauth/usage", request.RequestUri?.AbsolutePath, "利用量APIのパスが正しくありません");
-            BearerToken = request.Headers.Authorization?.Parameter;
-            HasBetaHeader = request.Headers.TryGetValues("anthropic-beta", out var values) && values.Contains("oauth-2025-04-20");
-            if (status == null) throw new HttpRequestException("ダミー通信エラー");
-            return Task.FromResult(new HttpResponseMessage(status.Value)
+            Claude = new ClaudeQuotaData
             {
-                Content = new StringContent(json, Encoding.UTF8, "application/json")
-            });
+                IsSuccess = true, IsSubscribed = true, IsSavedValue = true, SavedAt = savedAt,
+                HasFiveHourLimit = true, FiveHourRemainingPercent = 100, FiveHourResetText = "未使用",
+                HasWeeklyLimit = true, WeeklyRemainingPercent = 94, WeeklyResetText = "10/30 19:00 リセット",
+                StatusMessage = "プラン: Claude Pro (稼働中)"
+            }
+        };
+        var item = CreateItem(AiServiceType.Claude);
+        await fetcher.FetchUsageAsync(item);
+        Check.Equal("前回 10/26 08:58 / 未使用", item.PrimaryLimit.ResetTimeText, "保存値に前回の取得時刻を表示していません");
+        Check.Equal(94d, item.SecondaryLimit?.RemainingPercent ?? 0, "保存された週次枠を表示していません");
+        Check.True(item.CliInfo.StatusMessage.Contains("前回取得 (10/26 08:58)", StringComparison.Ordinal), "古い値であることを案内していません");
+        Check.Equal(savedAt, item.LastRefreshed, "保存時刻を最終更新時刻にしていません");
+    }
+
+    private sealed record ClaudeApiStep(string Path, HttpStatusCode? Status, string Json);
+
+    private sealed record ClaudeApiRequest(string Path, string? BearerToken, bool HasBetaHeader, string Body);
+
+    private sealed class ClaudeApiHandler(IEnumerable<ClaudeApiStep> steps) : HttpMessageHandler
+    {
+        private readonly Queue<ClaudeApiStep> _steps = new(steps);
+        public List<ClaudeApiRequest> Requests { get; } = [];
+
+        public static ClaudeApiStep Usage(HttpStatusCode? status, string json) => new("/api/oauth/usage", status, json);
+        public static ClaudeApiStep Token(HttpStatusCode status, string json) => new("/v1/oauth/token", status, json);
+
+        public void CheckCompleted() => Check.Equal(0, _steps.Count, "予定したHTTPリクエストが行われていません");
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Check.True(_steps.Count > 0, $"予定外のHTTPリクエストが発生しました: {request.RequestUri}");
+            var step = _steps.Dequeue();
+            Check.Equal(step.Path, request.RequestUri?.AbsolutePath, "HTTPパスが正しくありません");
+            var body = request.Content == null ? "" : await request.Content.ReadAsStringAsync(cancellationToken);
+            Requests.Add(new ClaudeApiRequest(step.Path, request.Headers.Authorization?.Parameter,
+                request.Headers.TryGetValues("anthropic-beta", out var values) && values.Contains("oauth-2025-04-20"), body));
+            if (step.Status == null) throw new HttpRequestException("ダミー通信エラー");
+            return new HttpResponseMessage(step.Status.Value)
+            {
+                Content = new StringContent(step.Json, Encoding.UTF8, "application/json")
+            };
         }
     }
 
@@ -256,6 +379,7 @@ internal static class SubscriptionStatusTests
         public CopilotQuotaData? Copilot { get; init; }
         public GrokQuotaData? Grok { get; init; }
         public bool ClaudeThrows { get; init; }
+        public ClaudeQuotaData? Claude { get; init; }
 
         protected override Task<CodexQuotaData?> FetchCodexQuotaAsync() => Task.FromResult(Codex);
         protected override Task<CopilotQuotaData?> FetchCopilotQuotaAsync() => Task.FromResult(Copilot);
@@ -264,6 +388,6 @@ internal static class SubscriptionStatusTests
 
         protected override Task<ClaudeQuotaData> FetchClaudeQuotaAsync() => ClaudeThrows
             ? throw new IOException("設定ファイルを読み取れません")
-            : Task.FromResult(new ClaudeQuotaData());
+            : Task.FromResult(Claude ?? new ClaudeQuotaData());
     }
 }

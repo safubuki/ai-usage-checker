@@ -1,10 +1,16 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace AIUsageChecker.Services;
@@ -22,6 +28,10 @@ public class ClaudeQuotaData
     public double WeeklyRemainingPercent { get; set; }
     public string WeeklyResetText { get; set; } = "";
     public string StatusMessage { get; set; } = "";
+
+    // 利用量APIで取得できず、~/.claude.json に Claude Code が保存した値を使った場合
+    public bool IsSavedValue { get; set; }
+    public DateTime? SavedAt { get; set; }
 }
 
 /// <summary>
@@ -36,11 +46,24 @@ internal sealed class ClaudeAuthStatus
 public class ClaudeQuotaClient
 {
     private const string UsageApiUrl = "https://api.anthropic.com/api/oauth/usage";
+    // Claude Code (claude.exe) のトークン更新と同じ送信先・既定値
+    private const string TokenUrl = "https://platform.claude.com/v1/oauth/token";
+    private const string DefaultClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+    private static readonly string[] DefaultScopes =
+        ["user:profile", "user:inference", "user:sessions:claude_code", "user:mcp_servers", "user:file_upload"];
+    private static readonly TimeSpan RefreshMargin = TimeSpan.FromMinutes(5);
+    // ロックが古いとみなされる10秒より短くし、更新中に他プロセスへロックを奪われないようにする。
+    private static readonly TimeSpan RefreshTimeout = TimeSpan.FromSeconds(8);
+    private static readonly TimeSpan LockStaleAfter = TimeSpan.FromSeconds(10);
+    private const int LockMaxRetries = 5;
     private static readonly TimeSpan AuthStatusTimeout = TimeSpan.FromSeconds(10);
     private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
     private readonly HttpClient _httpClient;
 
     public event Action<string>? LogOutputReceived;
+
+    // テストでロック待ちを短くするための待機間隔
+    internal TimeSpan LockRetryDelay { get; init; } = TimeSpan.FromSeconds(1);
 
     public ClaudeQuotaClient(HttpClient? httpClient = null)
     {
@@ -176,10 +199,11 @@ public class ClaudeQuotaClient
                 ReadUtilization(utElem, result, localNow);
                 if (result.IsSubscribed && (result.HasFiveHourLimit || result.HasWeeklyLimit))
                 {
-                    var savedAt = cuElem.TryGetProperty("fetchedAtMs", out var faElem) && faElem.TryGetInt64(out var fetchedAtMs)
-                        ? DateTimeOffset.FromUnixTimeMilliseconds(fetchedAtMs).LocalDateTime.ToString("MM/dd HH:mm")
-                        : "時刻不明";
-                    LogOutputReceived?.Invoke($"[Claude] 設定ファイルに保存された利用枠を使用します (保存時刻: {savedAt})");
+                    result.IsSavedValue = true;
+                    result.SavedAt = cuElem.TryGetProperty("fetchedAtMs", out var faElem) && faElem.TryGetInt64(out var fetchedAtMs)
+                        ? DateTimeOffset.FromUnixTimeMilliseconds(fetchedAtMs).LocalDateTime
+                        : null;
+                    LogOutputReceived?.Invoke($"[Claude] 設定ファイルに保存された利用枠を使用します (保存時刻: {result.SavedAt?.ToString("MM/dd HH:mm") ?? "時刻不明"})");
                 }
             }
 
@@ -249,7 +273,7 @@ public class ClaudeQuotaClient
 
     /// <summary>
     /// Claude Code の /usage と同じ利用量APIから最新の利用枠を取得する。
-    /// トークンの更新は Claude Code に任せる（ここで更新するとClaude Codeのログイン情報と食い違うため）。
+    /// トークンが期限切れ（間近）の場合は Claude Code と同じ手順で更新してから取得する。
     /// </summary>
     private async Task<JsonDocument?> FetchLiveUsageAsync(string credentialsFilePath)
     {
@@ -261,55 +285,35 @@ public class ClaudeQuotaClient
                 return null;
             }
 
-            string accessToken;
-            long expiresAtMs = 0;
-            using (var credDoc = JsonDocument.Parse(await File.ReadAllTextAsync(credentialsFilePath)))
-            {
-                var root = credDoc.RootElement;
-                if (root.ValueKind != JsonValueKind.Object ||
-                    !root.TryGetProperty("claudeAiOauth", out var oauthElem) || oauthElem.ValueKind != JsonValueKind.Object)
-                {
-                    LogOutputReceived?.Invoke("[Claude] 認証情報にアクセストークンがないため、保存された利用枠を使用します");
-                    return null;
-                }
-
-                accessToken = GetString(oauthElem, "accessToken");
-                if (oauthElem.TryGetProperty("expiresAt", out var expElem) && expElem.ValueKind == JsonValueKind.Number)
-                {
-                    expElem.TryGetInt64(out expiresAtMs);
-                }
-            }
-
-            if (string.IsNullOrEmpty(accessToken))
+            var token = await ReadOAuthTokenAsync(credentialsFilePath);
+            if (token == null || string.IsNullOrEmpty(token.AccessToken))
             {
                 LogOutputReceived?.Invoke("[Claude] 認証情報にアクセストークンがないため、保存された利用枠を使用します");
                 return null;
             }
 
-            if (expiresAtMs > 0 && DateTimeOffset.FromUnixTimeMilliseconds(expiresAtMs) <= DateTimeOffset.UtcNow.AddMinutes(1))
+            string? accessToken = token.AccessToken;
+            if (token.IsExpiring)
             {
-                LogOutputReceived?.Invoke("[Claude] アクセストークンの有効期限が切れているため、保存された利用枠を使用します (Claude Code の起動時に更新されます)");
-                return null;
+                LogOutputReceived?.Invoke("[Claude] アクセストークンの有効期限が切れている（または間近な）ため更新します");
+                accessToken = await TryRefreshTokenAsync(credentialsFilePath, token.AccessToken);
+                if (accessToken == null) return null;
             }
 
-            LogOutputReceived?.Invoke($"[Claude] GET {UsageApiUrl} 送信中...");
-            using var request = new HttpRequestMessage(HttpMethod.Get, UsageApiUrl);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-            request.Headers.Add("anthropic-beta", "oauth-2025-04-20");
-            request.Headers.Add("Accept", "application/json");
-
-            using var response = await _httpClient.SendAsync(request);
-            if (!response.IsSuccessStatusCode)
+            var (status, doc) = await RequestUsageAsync(accessToken);
+            if (status == HttpStatusCode.Unauthorized)
             {
-                LogOutputReceived?.Invoke($"[Claude] 利用量API HTTP {(int)response.StatusCode} {response.ReasonPhrase}。保存された利用枠を使用します");
-                return null;
+                LogOutputReceived?.Invoke("[Claude] 利用量APIが認証エラー (HTTP 401) を返したため、トークンを更新して再試行します");
+                accessToken = await TryRefreshTokenAsync(credentialsFilePath, accessToken);
+                if (accessToken == null) return null;
+                (status, doc) = await RequestUsageAsync(accessToken);
             }
 
-            var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            if (doc == null)
             {
-                doc.Dispose();
-                LogOutputReceived?.Invoke("[Claude] 利用量APIの応答を解析できないため、保存された利用枠を使用します");
+                LogOutputReceived?.Invoke(status is { } code
+                    ? $"[Claude] 利用量API HTTP {(int)code}。保存された利用枠を使用します"
+                    : "[Claude] 利用量APIの応答を解析できないため、保存された利用枠を使用します");
                 return null;
             }
 
@@ -320,6 +324,208 @@ public class ClaudeQuotaClient
         {
             LogOutputReceived?.Invoke($"[Claude] 利用量APIの取得に失敗したため、保存された利用枠を使用します: {ex.Message}");
             return null;
+        }
+    }
+
+    /// <returns>成功時は応答のJSON。失敗時は null と HTTP ステータス（解析エラー時は null）。</returns>
+    private async Task<(HttpStatusCode? Status, JsonDocument? Doc)> RequestUsageAsync(string accessToken)
+    {
+        LogOutputReceived?.Invoke($"[Claude] GET {UsageApiUrl} 送信中...");
+        using var request = new HttpRequestMessage(HttpMethod.Get, UsageApiUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Headers.Add("anthropic-beta", "oauth-2025-04-20");
+        request.Headers.Add("Accept", "application/json");
+
+        using var response = await _httpClient.SendAsync(request);
+        if (!response.IsSuccessStatusCode)
+        {
+            return (response.StatusCode, null);
+        }
+
+        var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        if (doc.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            doc.Dispose();
+            return (null, null);
+        }
+        return (response.StatusCode, doc);
+    }
+
+    /// <summary>
+    /// Claude Code と同じ手順でアクセストークンを更新し、~/.claude/.credentials.json に保存する。
+    /// Claude Code と同じロック (~/.claude/.oauth_refresh.lock) を使い、ロック中に読み直して他プロセスが更新済みならそのトークンを使う。
+    /// </summary>
+    /// <returns>使用できるアクセストークン。更新できなかった場合は null（資格情報は変更しない）。</returns>
+    private async Task<string?> TryRefreshTokenAsync(string credentialsFilePath, string staleAccessToken)
+    {
+        var lockPath = Path.Combine(Path.GetDirectoryName(credentialsFilePath) ?? ".", ".oauth_refresh.lock");
+        if (!await AcquireRefreshLockAsync(lockPath))
+        {
+            LogOutputReceived?.Invoke("[Claude] Claude Code がトークンを更新中のため、今回は保存された利用枠を使用します");
+            return null;
+        }
+
+        try
+        {
+            var current = await ReadOAuthTokenAsync(credentialsFilePath);
+            if (current == null || string.IsNullOrEmpty(current.RefreshToken))
+            {
+                LogOutputReceived?.Invoke("[Claude] 認証情報にリフレッシュトークンがないため、トークンを更新できません");
+                return null;
+            }
+
+            if (current.AccessToken != staleAccessToken && !current.IsExpiring)
+            {
+                LogOutputReceived?.Invoke("[Claude] 他のプロセス (Claude Code) が更新したトークンを使用します");
+                return current.AccessToken;
+            }
+
+            // Claude Code は claude.ai ログインで clientId が保存されていない場合、既定のクライアントIDとスコープで更新する。
+            bool useDefaultScopes = string.IsNullOrEmpty(current.ClientId) &&
+                (current.Scopes.Contains("user:inference") || !string.IsNullOrEmpty(current.SubscriptionType) || current.Scopes.Length == 0);
+            var body = JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                ["grant_type"] = "refresh_token",
+                ["refresh_token"] = current.RefreshToken,
+                ["client_id"] = string.IsNullOrEmpty(current.ClientId) ? DefaultClientId : current.ClientId,
+                ["scope"] = string.Join(" ", useDefaultScopes ? DefaultScopes : current.Scopes)
+            });
+
+            LogOutputReceived?.Invoke($"[Claude] POST {TokenUrl} (トークン更新) 送信中...");
+            using var request = new HttpRequestMessage(HttpMethod.Post, TokenUrl)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json")
+            };
+            using var timeout = new CancellationTokenSource(RefreshTimeout);
+            using var response = await _httpClient.SendAsync(request, timeout.Token);
+            var responseText = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                bool isInvalidGrant = responseText.Contains("invalid_grant", StringComparison.Ordinal);
+                LogOutputReceived?.Invoke(isInvalidGrant
+                    ? $"[Claude] トークン更新が拒否されました (HTTP {(int)response.StatusCode} invalid_grant)。'claude auth login' で再ログインが必要な可能性があります"
+                    : $"[Claude] トークン更新に失敗しました (HTTP {(int)response.StatusCode})。保存された利用枠を使用します");
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(responseText);
+            var root = doc.RootElement;
+            var newAccessToken = GetString(root, "access_token");
+            if (string.IsNullOrEmpty(newAccessToken))
+            {
+                LogOutputReceived?.Invoke("[Claude] トークン更新の応答にアクセストークンがありません。保存された利用枠を使用します");
+                return null;
+            }
+
+            var newRefreshToken = GetString(root, "refresh_token");
+            long expiresIn = root.TryGetProperty("expires_in", out var eiElem) && eiElem.TryGetInt64(out var ei) ? ei : 3600;
+            var newScopes = GetString(root, "scope").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            long expiresAtMs = DateTimeOffset.UtcNow.AddSeconds(expiresIn).ToUnixTimeMilliseconds();
+
+            await SaveOAuthTokenAsync(credentialsFilePath, newAccessToken,
+                string.IsNullOrEmpty(newRefreshToken) ? current.RefreshToken : newRefreshToken,
+                expiresAtMs, newScopes.Length > 0 ? newScopes : current.Scopes);
+            LogOutputReceived?.Invoke($"[Claude] トークンを更新しました (有効期限: {DateTimeOffset.FromUnixTimeMilliseconds(expiresAtMs).LocalDateTime:MM/dd HH:mm})");
+            return newAccessToken;
+        }
+        catch (Exception ex)
+        {
+            LogOutputReceived?.Invoke($"[Claude] トークン更新中にエラー: {ex.Message}。保存された利用枠を使用します");
+            return null;
+        }
+        finally
+        {
+            try { Directory.Delete(lockPath); } catch { }
+        }
+    }
+
+    /// <summary>
+    /// proper-lockfile (Claude Code) と同じく、ロック用ディレクトリの作成で排他し、10秒以上更新のないロックは古いとみなす。
+    /// </summary>
+    private async Task<bool> AcquireRefreshLockAsync(string lockPath)
+    {
+        for (int attempt = 0; attempt <= LockMaxRetries; attempt++)
+        {
+            if (CreateDirectory(lockPath, IntPtr.Zero)) return true;
+            if (!Directory.Exists(lockPath)) return false;
+
+            try
+            {
+                if (DateTime.UtcNow - Directory.GetLastWriteTimeUtc(lockPath) > LockStaleAfter)
+                {
+                    Directory.Delete(lockPath, recursive: true);
+                    continue;
+                }
+            }
+            catch
+            {
+                // 他プロセスが同時に解放・取得した場合は次の試行で判断する。
+            }
+
+            if (attempt < LockMaxRetries)
+            {
+                await Task.Delay(LockRetryDelay + TimeSpan.FromMilliseconds(Random.Shared.Next(0, (int)LockRetryDelay.TotalMilliseconds + 1)));
+            }
+        }
+        return false;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateDirectory(string lpPathName, IntPtr lpSecurityAttributes);
+
+    private sealed record ClaudeOAuthToken(string AccessToken, string RefreshToken, long ExpiresAtMs,
+        string ClientId, string SubscriptionType, string[] Scopes)
+    {
+        // Claude Code と同じく、有効期限の5分前から更新対象とする。
+        public bool IsExpiring => ExpiresAtMs > 0 &&
+            DateTimeOffset.FromUnixTimeMilliseconds(ExpiresAtMs) <= DateTimeOffset.UtcNow + RefreshMargin;
+    }
+
+    private static async Task<ClaudeOAuthToken?> ReadOAuthTokenAsync(string credentialsFilePath)
+    {
+        using var doc = JsonDocument.Parse(await File.ReadAllTextAsync(credentialsFilePath));
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("claudeAiOauth", out var oauthElem) || oauthElem.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        long expiresAtMs = oauthElem.TryGetProperty("expiresAt", out var expElem) && expElem.ValueKind == JsonValueKind.Number &&
+            expElem.TryGetInt64(out var exp) ? exp : 0;
+        var scopes = oauthElem.TryGetProperty("scopes", out var scopesElem) && scopesElem.ValueKind == JsonValueKind.Array
+            ? scopesElem.EnumerateArray().Where(s => s.ValueKind == JsonValueKind.String).Select(s => s.GetString() ?? "").ToArray()
+            : [];
+        return new ClaudeOAuthToken(GetString(oauthElem, "accessToken"), GetString(oauthElem, "refreshToken"), expiresAtMs,
+            GetString(oauthElem, "clientId"), GetString(oauthElem, "subscriptionType"), scopes);
+    }
+
+    /// <summary>
+    /// claudeAiOauth のトークン項目だけを書き換え、契約種別など他の項目は保持する。一時ファイルから置き換えて途中状態を残さない。
+    /// </summary>
+    private static async Task SaveOAuthTokenAsync(string credentialsFilePath, string accessToken, string refreshToken,
+        long expiresAtMs, string[] scopes)
+    {
+        var root = JsonNode.Parse(await File.ReadAllTextAsync(credentialsFilePath)) as JsonObject
+            ?? throw new InvalidDataException("認証情報の形式が正しくありません");
+        var oauth = root["claudeAiOauth"] as JsonObject
+            ?? throw new InvalidDataException("認証情報に claudeAiOauth がありません");
+
+        oauth["accessToken"] = accessToken;
+        oauth["refreshToken"] = refreshToken;
+        oauth["expiresAt"] = expiresAtMs;
+        oauth["scopes"] = new JsonArray(scopes.Select(s => (JsonNode?)JsonValue.Create(s)).ToArray());
+
+        var tempPath = $"{credentialsFilePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await File.WriteAllTextAsync(tempPath, root.ToJsonString());
+            File.Move(tempPath, credentialsFilePath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath)) File.Delete(tempPath);
         }
     }
 

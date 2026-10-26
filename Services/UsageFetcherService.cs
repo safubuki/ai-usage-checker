@@ -127,7 +127,20 @@ public class UsageFetcherService
             try
             {
                 var data = await FetchClaudeQuotaAsync();
-                if (data.IsSuccess)
+                if (data.IsSuccess && data.IsSavedValue)
+                {
+                    // 利用量APIで取得できず Claude Code の保存値を使った場合は、古いデータとして保存時刻を表示する。
+                    // 以前に利用量APIで取得した値の方が新しければ、そちらを表示し続ける。
+                    bool hasNewerLiveData = _lastClaudeData?.IsSuccess == true && _lastClaudeData.IsSubscribed &&
+                        !_lastClaudeData.IsSavedValue && _claudeLastSuccessAt > data.SavedAt;
+                    if (!hasNewerLiveData)
+                    {
+                        _lastClaudeData = data;
+                        _claudeLastSuccessAt = data.SavedAt ?? _claudeLastSuccessAt;
+                    }
+                    _claudeDataIsStale = true;
+                }
+                else if (data.IsSuccess)
                 {
                     _lastClaudeData = data;
                     _claudeDataIsStale = false;
@@ -288,17 +301,16 @@ public class UsageFetcherService
 
         if (hasUsageError)
         {
+            // 一時的な通信失敗では、直近の正常値を消さず取得時刻を明示する。
             if (item.ServiceType == AiServiceType.GPT && _lastCodexData?.IsSuccess == true)
             {
-                // 一時的な通信失敗では、直近の正常値を消さず取得時刻を明示する。
                 ApplyGptQuota(item);
-                var lastSuccessText = _codexLastSuccessAt?.ToString("MM/dd HH:mm") ?? "時刻不明";
-                item.CliInfo.StatusMessage = $"取得失敗。前回取得 ({lastSuccessText}) の利用枠を表示中";
-                item.PrimaryLimit.ResetTimeText = $"前回 {lastSuccessText} / {item.PrimaryLimit.ResetTimeText}";
-                if (item.SecondaryLimit != null)
-                {
-                    item.SecondaryLimit.ResetTimeText = $"前回 {lastSuccessText} / {item.SecondaryLimit.ResetTimeText}";
-                }
+                MarkPreviousValue(item, _codexLastSuccessAt);
+            }
+            else if (item.ServiceType == AiServiceType.Claude && _lastClaudeData?.IsSuccess == true && _lastClaudeData.IsSubscribed)
+            {
+                ApplyClaudeQuota(item);
+                MarkPreviousValue(item, _claudeLastSuccessAt);
             }
             else
             {
@@ -340,6 +352,17 @@ public class UsageFetcherService
         item.LastRefreshed = hasUsageError
             ? GetLastSuccessfulRefresh(item.ServiceType) ?? item.LastRefreshed
             : DateTime.Now;
+    }
+
+    private static void MarkPreviousValue(AiUsageItem item, DateTime? lastSuccessAt)
+    {
+        var lastSuccessText = lastSuccessAt?.ToString("MM/dd HH:mm") ?? "時刻不明";
+        item.CliInfo.StatusMessage = $"取得失敗。前回取得 ({lastSuccessText}) の利用枠を表示中";
+        item.PrimaryLimit.ResetTimeText = $"前回 {lastSuccessText} / {item.PrimaryLimit.ResetTimeText}";
+        if (item.SecondaryLimit != null)
+        {
+            item.SecondaryLimit.ResetTimeText = $"前回 {lastSuccessText} / {item.SecondaryLimit.ResetTimeText}";
+        }
     }
 
     private static void ApplyUsageError(AiUsageItem item)
