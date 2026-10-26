@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -33,14 +35,28 @@ internal sealed class ClaudeAuthStatus
 
 public class ClaudeQuotaClient
 {
+    private const string UsageApiUrl = "https://api.anthropic.com/api/oauth/usage";
     private static readonly TimeSpan AuthStatusTimeout = TimeSpan.FromSeconds(10);
+    private static readonly HttpClient SharedHttpClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+    private readonly HttpClient _httpClient;
 
     public event Action<string>? LogOutputReceived;
+
+    public ClaudeQuotaClient(HttpClient? httpClient = null)
+    {
+        _httpClient = httpClient ?? SharedHttpClient;
+    }
 
     public static string GetConfigFilePath()
     {
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return Path.Combine(userProfile, ".claude.json");
+    }
+
+    public static string GetCredentialsFilePath()
+    {
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(userProfile, ".claude", ".credentials.json");
     }
 
     public static bool IsConfigExists()
@@ -50,13 +66,17 @@ public class ClaudeQuotaClient
 
     public Task<ClaudeQuotaData> FetchClaudeQuotaAsync()
     {
-        return FetchClaudeQuotaAsync(GetConfigFilePath(), ReadAuthStatusFromCliAsync);
+        return FetchClaudeQuotaAsync(GetConfigFilePath(), ReadAuthStatusFromCliAsync, GetCredentialsFilePath());
     }
 
     /// <param name="readAuthStatusJson">
     /// `claude auth status --json` の出力を返す処理。null の場合はCLIを確認せず設定ファイルだけで判定する。
     /// </param>
-    internal async Task<ClaudeQuotaData> FetchClaudeQuotaAsync(string configFilePath, Func<Task<string?>>? readAuthStatusJson = null)
+    /// <param name="credentialsFilePath">
+    /// 利用量APIの認証に使う ~/.claude/.credentials.json。null の場合はAPIを呼ばず設定ファイルの保存値を使う。
+    /// </param>
+    internal async Task<ClaudeQuotaData> FetchClaudeQuotaAsync(string configFilePath, Func<Task<string?>>? readAuthStatusJson = null,
+        string? credentialsFilePath = null)
     {
         var result = new ClaudeQuotaData();
 
@@ -136,37 +156,30 @@ public class ClaudeQuotaClient
                 LogOutputReceived?.Invoke($"[Claude] 設定ファイルの契約情報 (billingType={(string.IsNullOrEmpty(billingType) ? "なし" : billingType)}) は古いため、CLIの契約種別を優先します");
             }
 
-            // 3. 利用状況クォータ (cachedUsageUtilization) の取得
-            if (root.ValueKind == JsonValueKind.Object &&
-                root.TryGetProperty("cachedUsageUtilization", out var cuElem) && cuElem.ValueKind == JsonValueKind.Object)
+            // 3. 利用状況クォータの取得
+            // 設定ファイルの cachedUsageUtilization は Claude Code が保存した時点の値で更新が遅れるため、
+            // 契約中は利用量APIの最新値を優先し、取得できない場合だけ保存値を使う。
+            if (result.IsSubscribed && credentialsFilePath != null)
             {
-                if (cuElem.TryGetProperty("utilization", out var utElem) && utElem.ValueKind == JsonValueKind.Object)
+                using var liveDoc = await FetchLiveUsageAsync(credentialsFilePath);
+                if (liveDoc != null)
                 {
-                    // five_hour (5時間制限)
-                    if (utElem.TryGetProperty("five_hour", out var fhElem) && fhElem.ValueKind == JsonValueKind.Object)
-                    {
-                        double util = GetDouble(fhElem, "utilization");
-                        result.FiveHourRemainingPercent = Math.Max(0.0, 100.0 - util);
-                        result.HasFiveHourLimit = true;
+                    ReadUtilization(liveDoc.RootElement, result, localNow);
+                }
+            }
 
-                        if (fhElem.TryGetProperty("resets_at", out var rAt) && rAt.ValueKind == JsonValueKind.String)
-                        {
-                            result.FiveHourResetText = ResetTimeFormatter.Format(rAt.GetString(), localNow);
-                        }
-                    }
-
-                    // seven_day (週次制限)
-                    if (utElem.TryGetProperty("seven_day", out var sdElem) && sdElem.ValueKind == JsonValueKind.Object)
-                    {
-                        double util = GetDouble(sdElem, "utilization");
-                        result.WeeklyRemainingPercent = Math.Max(0.0, 100.0 - util);
-                        result.HasWeeklyLimit = true;
-
-                        if (sdElem.TryGetProperty("resets_at", out var rAt) && rAt.ValueKind == JsonValueKind.String)
-                        {
-                            result.WeeklyResetText = ResetTimeFormatter.Format(rAt.GetString(), localNow);
-                        }
-                    }
+            if (!result.HasFiveHourLimit && !result.HasWeeklyLimit &&
+                root.ValueKind == JsonValueKind.Object &&
+                root.TryGetProperty("cachedUsageUtilization", out var cuElem) && cuElem.ValueKind == JsonValueKind.Object &&
+                cuElem.TryGetProperty("utilization", out var utElem) && utElem.ValueKind == JsonValueKind.Object)
+            {
+                ReadUtilization(utElem, result, localNow);
+                if (result.IsSubscribed && (result.HasFiveHourLimit || result.HasWeeklyLimit))
+                {
+                    var savedAt = cuElem.TryGetProperty("fetchedAtMs", out var faElem) && faElem.TryGetInt64(out var fetchedAtMs)
+                        ? DateTimeOffset.FromUnixTimeMilliseconds(fetchedAtMs).LocalDateTime.ToString("MM/dd HH:mm")
+                        : "時刻不明";
+                    LogOutputReceived?.Invoke($"[Claude] 設定ファイルに保存された利用枠を使用します (保存時刻: {savedAt})");
                 }
             }
 
@@ -200,6 +213,113 @@ public class ClaudeQuotaClient
             result.IsSubscribed = false;
             result.StatusMessage = "利用枠の取得エラー (次回更新で再試行)";
             return result;
+        }
+    }
+
+    private static void ReadUtilization(JsonElement utElem, ClaudeQuotaData result, DateTime localNow)
+    {
+        if (utElem.ValueKind != JsonValueKind.Object) return;
+
+        // five_hour (5時間制限)
+        if (utElem.TryGetProperty("five_hour", out var fhElem) && fhElem.ValueKind == JsonValueKind.Object)
+        {
+            double util = GetDouble(fhElem, "utilization");
+            result.FiveHourRemainingPercent = Math.Max(0.0, 100.0 - util);
+            result.HasFiveHourLimit = true;
+
+            // 5時間枠は使い始めた時点で開始するため、未使用の間はリセット時刻がない。
+            result.FiveHourResetText = fhElem.TryGetProperty("resets_at", out var rAt) && rAt.ValueKind == JsonValueKind.String
+                ? ResetTimeFormatter.Format(rAt.GetString(), localNow)
+                : "未使用";
+        }
+
+        // seven_day (週次制限)
+        if (utElem.TryGetProperty("seven_day", out var sdElem) && sdElem.ValueKind == JsonValueKind.Object)
+        {
+            double util = GetDouble(sdElem, "utilization");
+            result.WeeklyRemainingPercent = Math.Max(0.0, 100.0 - util);
+            result.HasWeeklyLimit = true;
+
+            if (sdElem.TryGetProperty("resets_at", out var rAt) && rAt.ValueKind == JsonValueKind.String)
+            {
+                result.WeeklyResetText = ResetTimeFormatter.Format(rAt.GetString(), localNow);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Claude Code の /usage と同じ利用量APIから最新の利用枠を取得する。
+    /// トークンの更新は Claude Code に任せる（ここで更新するとClaude Codeのログイン情報と食い違うため）。
+    /// </summary>
+    private async Task<JsonDocument?> FetchLiveUsageAsync(string credentialsFilePath)
+    {
+        try
+        {
+            if (!File.Exists(credentialsFilePath))
+            {
+                LogOutputReceived?.Invoke("[Claude] 認証情報 (~/.claude/.credentials.json) がないため、保存された利用枠を使用します");
+                return null;
+            }
+
+            string accessToken;
+            long expiresAtMs = 0;
+            using (var credDoc = JsonDocument.Parse(await File.ReadAllTextAsync(credentialsFilePath)))
+            {
+                var root = credDoc.RootElement;
+                if (root.ValueKind != JsonValueKind.Object ||
+                    !root.TryGetProperty("claudeAiOauth", out var oauthElem) || oauthElem.ValueKind != JsonValueKind.Object)
+                {
+                    LogOutputReceived?.Invoke("[Claude] 認証情報にアクセストークンがないため、保存された利用枠を使用します");
+                    return null;
+                }
+
+                accessToken = GetString(oauthElem, "accessToken");
+                if (oauthElem.TryGetProperty("expiresAt", out var expElem) && expElem.ValueKind == JsonValueKind.Number)
+                {
+                    expElem.TryGetInt64(out expiresAtMs);
+                }
+            }
+
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                LogOutputReceived?.Invoke("[Claude] 認証情報にアクセストークンがないため、保存された利用枠を使用します");
+                return null;
+            }
+
+            if (expiresAtMs > 0 && DateTimeOffset.FromUnixTimeMilliseconds(expiresAtMs) <= DateTimeOffset.UtcNow.AddMinutes(1))
+            {
+                LogOutputReceived?.Invoke("[Claude] アクセストークンの有効期限が切れているため、保存された利用枠を使用します (Claude Code の起動時に更新されます)");
+                return null;
+            }
+
+            LogOutputReceived?.Invoke($"[Claude] GET {UsageApiUrl} 送信中...");
+            using var request = new HttpRequestMessage(HttpMethod.Get, UsageApiUrl);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.Add("anthropic-beta", "oauth-2025-04-20");
+            request.Headers.Add("Accept", "application/json");
+
+            using var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                LogOutputReceived?.Invoke($"[Claude] 利用量API HTTP {(int)response.StatusCode} {response.ReasonPhrase}。保存された利用枠を使用します");
+                return null;
+            }
+
+            var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                doc.Dispose();
+                LogOutputReceived?.Invoke("[Claude] 利用量APIの応答を解析できないため、保存された利用枠を使用します");
+                return null;
+            }
+
+            LogOutputReceived?.Invoke("[Claude] 利用量APIから最新の利用枠を取得しました");
+            return doc;
+        }
+        catch (Exception ex)
+        {
+            LogOutputReceived?.Invoke($"[Claude] 利用量APIの取得に失敗したため、保存された利用枠を使用します: {ex.Message}");
+            return null;
         }
     }
 

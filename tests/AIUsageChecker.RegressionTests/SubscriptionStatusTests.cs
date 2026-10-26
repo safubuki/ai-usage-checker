@@ -1,4 +1,7 @@
 using System.IO;
+using System.Net;
+using System.Net.Http;
+using System.Text;
 using AIUsageChecker.Models;
 using AIUsageChecker.Services;
 
@@ -22,6 +25,10 @@ internal static class SubscriptionStatusTests
         yield return new("Claude契約: CLIで契約中・利用枠なしは未契約にせず取得エラー", CliSubscribedWithoutUsageAsync);
         yield return new("Claude契約: CLIの結果が不正なら設定ファイルで判定", InvalidCliOutputAsync);
         yield return new("Claude契約: 判定前のデータなしを未契約と表示しない", ClaudeNoDataIsNotUnsubscribedAsync);
+        yield return new("Claude利用量: 利用量APIの最新値を保存値より優先", LiveUsageOverridesSavedAsync);
+        yield return new("Claude利用量: 利用量APIの失敗時は保存値を表示", () => LiveUsageFailureFallsBackAsync(HttpStatusCode.Unauthorized));
+        yield return new("Claude利用量: 利用量APIの通信エラー時は保存値を表示", () => LiveUsageFailureFallsBackAsync(null));
+        yield return new("Claude利用量: トークン期限切れならAPIを呼ばず保存値を表示", ExpiredTokenSkipsLiveUsageAsync);
         yield return new("GPT契約: plan_type=free は未契約、利用枠は表示", () => GptPlanAsync("free", false));
         yield return new("GPT契約: plan_type=plus は契約中", () => GptPlanAsync("plus", true));
         yield return new("Copilot契約: copilot_plan=free は未契約", () => CopilotPlanAsync("free", "free_limited_copilot", false));
@@ -98,6 +105,91 @@ internal static class SubscriptionStatusTests
         var item = CreateItem(AiServiceType.Claude);
         await fetcher.FetchUsageAsync(item);
         Check.True(item.CliInfo.StatusBadgeText != "未契約", "判定できていないClaudeを未契約と表示しています");
+    }
+
+    private const string SubscribedConfig = """
+        {"oauthAccount":{"billingType":"stripe_subscription","organizationType":"claude_pro"},
+         "cachedUsageUtilization":{"fetchedAtMs":1792972710015,"utilization":{
+           "five_hour":{"utilization":0,"resets_at":null},
+           "seven_day":{"utilization":6,"resets_at":"2026-10-30T10:00:00Z"}}}}
+        """;
+
+    private const string LiveUsageJson = """
+        {"five_hour":{"utilization":14,"resets_at":"2026-10-26T05:00:00Z"},
+         "seven_day":{"utilization":8,"resets_at":"2026-10-30T10:00:00Z"}}
+        """;
+
+    private static async Task<(TemporaryDirectory Temp, string ConfigPath, string CredentialsPath)> CreateClaudeFilesAsync(DateTimeOffset tokenExpiresAt)
+    {
+        var temp = new TemporaryDirectory();
+        var configPath = temp.FilePath("claude.json");
+        var credentialsPath = temp.FilePath("credentials.json");
+        await File.WriteAllTextAsync(configPath, SubscribedConfig);
+        await File.WriteAllTextAsync(credentialsPath,
+            $$$"""{"claudeAiOauth":{"accessToken":"dummy-access-token","expiresAt":{{{tokenExpiresAt.ToUnixTimeMilliseconds()}}}}}""");
+        return (temp, configPath, credentialsPath);
+    }
+
+    private static async Task LiveUsageOverridesSavedAsync()
+    {
+        var (temp, configPath, credentialsPath) = await CreateClaudeFilesAsync(DateTimeOffset.UtcNow.AddHours(1));
+        using var _ = temp;
+        using var handler = new UsageApiHandler(HttpStatusCode.OK, LiveUsageJson);
+        using var http = new HttpClient(handler);
+        var result = await new ClaudeQuotaClient(http).FetchClaudeQuotaAsync(configPath, null, credentialsPath);
+        Check.Equal(1, handler.RequestCount, "利用量APIを呼び出していません");
+        Check.Equal("dummy-access-token", handler.BearerToken, "認証情報のトークンを使っていません");
+        Check.True(handler.HasBetaHeader, "利用量APIに必要なヘッダーがありません");
+        Check.True(result.IsSuccess && result.IsSubscribed, "最新値の取得後に契約中と判定していません");
+        Check.Equal(86.0, result.FiveHourRemainingPercent, "5時間枠に最新値を反映していません");
+        Check.Equal(92.0, result.WeeklyRemainingPercent, "週次枠に最新値を反映していません");
+        Check.True(result.FiveHourResetText.Contains("リセット", StringComparison.Ordinal), "5時間枠のリセット時刻を表示していません");
+    }
+
+    private static async Task LiveUsageFailureFallsBackAsync(HttpStatusCode? status)
+    {
+        var (temp, configPath, credentialsPath) = await CreateClaudeFilesAsync(DateTimeOffset.UtcNow.AddHours(1));
+        using var _ = temp;
+        using var handler = new UsageApiHandler(status, "{}");
+        using var http = new HttpClient(handler);
+        var result = await new ClaudeQuotaClient(http).FetchClaudeQuotaAsync(configPath, null, credentialsPath);
+        Check.Equal(1, handler.RequestCount, "利用量APIを呼び出していません");
+        Check.True(result.IsSuccess && result.IsSubscribed && !result.IsAuthRequired,
+            "利用量APIの失敗を認証エラーまたは未契約として扱っています");
+        Check.Equal(94.0, result.WeeklyRemainingPercent, "保存された利用枠を表示していません");
+        Check.Equal("未使用", result.FiveHourResetText, "未使用の5時間枠を案内していません");
+    }
+
+    private static async Task ExpiredTokenSkipsLiveUsageAsync()
+    {
+        var (temp, configPath, credentialsPath) = await CreateClaudeFilesAsync(DateTimeOffset.UtcNow.AddMinutes(-5));
+        using var _ = temp;
+        using var handler = new UsageApiHandler(HttpStatusCode.OK, LiveUsageJson);
+        using var http = new HttpClient(handler);
+        var result = await new ClaudeQuotaClient(http).FetchClaudeQuotaAsync(configPath, null, credentialsPath);
+        Check.Equal(0, handler.RequestCount, "期限切れトークンで利用量APIを呼び出しています");
+        Check.True(result.IsSuccess && result.IsSubscribed, "保存値で契約中と判定していません");
+        Check.Equal(94.0, result.WeeklyRemainingPercent, "保存された利用枠を表示していません");
+    }
+
+    private sealed class UsageApiHandler(HttpStatusCode? status, string json) : HttpMessageHandler
+    {
+        public int RequestCount { get; private set; }
+        public string? BearerToken { get; private set; }
+        public bool HasBetaHeader { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            Check.Equal("/api/oauth/usage", request.RequestUri?.AbsolutePath, "利用量APIのパスが正しくありません");
+            BearerToken = request.Headers.Authorization?.Parameter;
+            HasBetaHeader = request.Headers.TryGetValues("anthropic-beta", out var values) && values.Contains("oauth-2025-04-20");
+            if (status == null) throw new HttpRequestException("ダミー通信エラー");
+            return Task.FromResult(new HttpResponseMessage(status.Value)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            });
+        }
     }
 
     private static async Task GptPlanAsync(string planType, bool expectedSubscribed)
