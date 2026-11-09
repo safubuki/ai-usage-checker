@@ -34,7 +34,7 @@ public class LanguageServerQuotaClient
     private static readonly HttpClient HttpClient = new() { Timeout = TimeSpan.FromSeconds(3) };
     private string? _cachedToken;
     private int? _cachedPort;
-    private DateTime _lastSuccessfulQuery = DateTime.MinValue;
+    public event Action<string>? LogOutputReceived;
 
     public async Task<List<QuotaGroup>?> FetchQuotaSummaryAsync()
     {
@@ -42,70 +42,75 @@ public class LanguageServerQuotaClient
         if (!string.IsNullOrEmpty(_cachedToken) && _cachedPort.HasValue)
         {
             var cachedResult = await TryQueryEndpointAsync(_cachedPort.Value, _cachedToken);
-            if (cachedResult != null)
+            if (HasQuota(cachedResult))
             {
-                _lastSuccessfulQuery = DateTime.Now;
                 return cachedResult;
             }
+            _cachedToken = null;
+            _cachedPort = null;
         }
 
         // 2. 稼働中の language_server_windows_x64 プロセスからトークンとポートを探索
         try
         {
-            var (token, pid) = FindServerProcessInfo();
-            if (string.IsNullOrEmpty(token) || !pid.HasValue)
+            var servers = FindServerProcesses();
+            if (servers.Count == 0)
             {
+                LogOutputReceived?.Invoke("[Antigravity IDE] 起動中の言語サーバーが見つかりません。");
                 return null;
             }
 
-            _cachedToken = token;
-
-            // 当該 PID がリッスンしているポートを探索
-            var ports = FindListeningPortsForPid(pid.Value);
-            foreach (var port in ports)
+            // 複数ウィンドウや再起動時、先頭のサーバーが未認証・終了中でも次を確認する。
+            foreach (var (token, pid) in servers)
             {
-                var result = await TryQueryEndpointAsync(port, token);
-                if (result != null)
+                foreach (var port in FindListeningPortsForPid(pid))
                 {
-                    _cachedPort = port;
-                    _lastSuccessfulQuery = DateTime.Now;
-                    return result;
+                    var result = await TryQueryEndpointAsync(port, token);
+                    if (HasQuota(result))
+                    {
+                        _cachedToken = token;
+                        _cachedPort = port;
+                        return result;
+                    }
                 }
             }
+            LogOutputReceived?.Invoke($"[Antigravity IDE] {servers.Count} 個の言語サーバーから利用枠を取得できませんでした。");
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"Error querying LanguageServer quota: {ex.Message}");
+            LogOutputReceived?.Invoke($"[Antigravity IDE] 探索エラー: {ex.GetType().Name}");
         }
 
         return null;
     }
 
-    private (string? Token, int? Pid) FindServerProcessInfo()
+    private static bool HasQuota(List<QuotaGroup>? groups) => UsageFetcherService.HasUsableGeminiQuota(groups);
+
+    protected virtual List<(string Token, int Pid)> FindServerProcesses()
     {
-        try
+        var servers = new List<(string Token, int Pid)>();
+        using var searcher = new ManagementObjectSearcher("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name LIKE '%language_server%'");
+        using var results = searcher.Get();
+        foreach (ManagementObject obj in results)
         {
-            using var searcher = new ManagementObjectSearcher("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name LIKE '%language_server%'");
-            foreach (ManagementObject obj in searcher.Get())
+            using (obj)
             {
                 var cmd = obj["CommandLine"]?.ToString();
                 var pid = Convert.ToInt32(obj["ProcessId"]);
-                if (!string.IsNullOrEmpty(cmd))
+                if (!string.IsNullOrEmpty(cmd) && cmd.Contains("antigravity", StringComparison.OrdinalIgnoreCase))
                 {
-                    var match = Regex.Match(cmd, @"--csrf_token\s+([a-f0-9\-]+)", RegexOptions.IgnoreCase);
+                    var match = Regex.Match(cmd, "--csrf_token(?:\\s+|=)\"?([a-f0-9\\-]+)", RegexOptions.IgnoreCase);
                     if (match.Success)
                     {
-                        return (match.Groups[1].Value, pid);
+                        servers.Add((match.Groups[1].Value, pid));
                     }
                 }
             }
         }
-        catch { }
-
-        return (null, null);
+        return servers;
     }
 
-    private List<int> FindListeningPortsForPid(int pid)
+    protected virtual List<int> FindListeningPortsForPid(int pid)
     {
         var ports = new List<int>();
         try
@@ -143,7 +148,7 @@ public class LanguageServerQuotaClient
         return ports;
     }
 
-    private async Task<List<QuotaGroup>?> TryQueryEndpointAsync(int port, string csrfToken)
+    protected virtual async Task<List<QuotaGroup>?> TryQueryEndpointAsync(int port, string csrfToken)
     {
         try
         {
@@ -152,7 +157,7 @@ public class LanguageServerQuotaClient
             request.Headers.Add("x-codeium-csrf-token", csrfToken);
             request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
 
-            var response = await HttpClient.SendAsync(request);
+            using var response = await HttpClient.SendAsync(request);
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();

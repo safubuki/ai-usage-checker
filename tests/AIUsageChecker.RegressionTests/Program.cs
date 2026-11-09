@@ -4,6 +4,8 @@ var tests = UsageFetcherRecoveryTests.GetCases().Concat(GrokQuotaClientTests.Get
     .Concat(ClaudeQuotaClientTests.GetCases())
     .Concat(SubscriptionStatusTests.GetCases())
     .Concat(AntigravityQuotaSourceTests.GetCases())
+    .Concat(AgyQuotaClientTests.GetCases())
+    .Concat(LanguageServerQuotaClientTests.GetCases())
     .Concat(CardDragDropTests.GetCases())
     .Concat(CliUpdateNotificationTests.GetCases())
     .Concat(ResetTimeTests.GetCases())

@@ -51,6 +51,7 @@ public class UsageFetcherService
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
         _agyClient.LogOutputReceived += msg => LogOutputReceived?.Invoke(msg);
+        _quotaClient.LogOutputReceived += msg => LogOutputReceived?.Invoke(msg);
         _codexClient.LogOutputReceived += msg => LogOutputReceived?.Invoke(msg);
         _copilotClient.LogOutputReceived += msg => LogOutputReceived?.Invoke(msg);
         _claudeClient.LogOutputReceived += msg => LogOutputReceived?.Invoke(msg);
@@ -273,7 +274,16 @@ public class UsageFetcherService
 
     protected virtual async Task<List<QuotaGroup>?> FetchGeminiQuotaAsync()
     {
-        var groups = await FetchAgyQuotaAsync();
+        List<QuotaGroup>? groups = null;
+        try
+        {
+            groups = await FetchAgyQuotaAsync();
+        }
+        catch (Exception ex)
+        {
+            // CLIの起動例外でもIDEによる補助取得は続行する。
+            LogOutputReceived?.Invoke($"[Antigravity CLI] 取得例外: {ex.GetType().Name}");
+        }
         if (HasUsableGeminiQuota(groups))
         {
             _geminiQuotaSource = UsageDataSource.Cli;
@@ -311,6 +321,11 @@ public class UsageFetcherService
             {
                 ApplyClaudeQuota(item);
                 MarkPreviousValue(item, _claudeLastSuccessAt);
+            }
+            else if (item.ServiceType == AiServiceType.Gemini && HasUsableGeminiQuota(groups))
+            {
+                ApplyGeminiQuota(item, groups);
+                MarkPreviousValue(item, _geminiLastSuccessAt);
             }
             else
             {
@@ -358,10 +373,12 @@ public class UsageFetcherService
     {
         var lastSuccessText = lastSuccessAt?.ToString("MM/dd HH:mm") ?? "時刻不明";
         item.CliInfo.StatusMessage = $"取得失敗。前回取得 ({lastSuccessText}) の利用枠を表示中";
-        item.PrimaryLimit.ResetTimeText = $"前回 {lastSuccessText} / {item.PrimaryLimit.ResetTimeText}";
-        if (item.SecondaryLimit != null)
+        // カード切替先のArgon・外部モデルと詳細画面にも前回値であることを明示する。
+        var limits = item.AllLimits.Concat(new[] { item.PrimaryLimit, item.SecondaryLimit,
+            item.ArgonLimit, item.ExternalFiveHourLimit, item.ExternalWeeklyLimit }).OfType<UsageLimitInfo>().Distinct();
+        foreach (var limit in limits)
         {
-            item.SecondaryLimit.ResetTimeText = $"前回 {lastSuccessText} / {item.SecondaryLimit.ResetTimeText}";
+            limit.ResetTimeText = $"前回 {lastSuccessText} / {limit.ResetTimeText}";
         }
     }
 
@@ -720,7 +737,7 @@ public class UsageFetcherService
                 item.SecondaryLimit = null;
             }
 
-            item.CliInfo.IsLoggedIn = !_geminiDataIsStale || CliManagerService.IsAntigravityAuthExists();
+            if (!_geminiDataIsStale) item.CliInfo.IsLoggedIn = true;
             item.CliInfo.IsSubscribed = true;
             item.CliInfo.StatusMessage = "Google DeepMind 連携稼働中";
 
@@ -1071,7 +1088,7 @@ public class UsageFetcherService
             !g.DisplayName.Contains("Argon", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool HasUsableGeminiQuota(List<QuotaGroup>? groups)
+    internal static bool HasUsableGeminiQuota(List<QuotaGroup>? groups)
     {
         static bool HasUsableBucket(QuotaGroup? group) =>
             group?.Buckets.Any(b =>

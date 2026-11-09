@@ -11,6 +11,7 @@ internal static class AntigravityQuotaSourceTests
     {
         yield return new("Antigravity: CLI成功時はIDEを呼び出さず取得元を表示", CliSuccessAsync);
         yield return new("Antigravity: CLI取得失敗時はIDE取得元を表示", () => IdeFallbackAsync(null));
+        yield return new("Antigravity: CLI例外時もIDEで補助取得", CliExceptionAsync);
         yield return new("Antigravity: CLIに利用枠がない場合もIDEで補助取得", () => IdeFallbackAsync(
             [new QuotaGroup { DisplayName = "Gemini", Buckets = [] }]));
         yield return new("Antigravity: IDE補助取得後のCLI復帰で取得元を更新", CliRecoveryAsync);
@@ -92,6 +93,16 @@ internal static class AntigravityQuotaSourceTests
         Check.Equal(62d, item.PrimaryLimit.RemainingPercent, "CLI復帰後もIDEの古い利用枠を表示しています");
     }
 
+    private static async Task CliExceptionAsync()
+    {
+        using var temp = new TemporaryDirectory();
+        var fetcher = new FakeUsageFetcher(temp.FilePath("cache.json")) { ThrowCli = true, IdeResponse = CreateQuota() };
+        var item = CreateItem();
+        await fetcher.FetchUsageAsync(item);
+        CheckSource(item, "取得元：IDE（CLI取得失敗時の補助）");
+        Check.Equal(71d, item.PrimaryLimit.RemainingPercent, "CLI例外により補助取得を打ち切りました");
+    }
+
     private static async Task InitialFailureAsync()
     {
         using var temp = new TemporaryDirectory();
@@ -121,10 +132,15 @@ internal static class AntigravityQuotaSourceTests
         CheckSource(item, PreviousSourceText(source));
         Check.True(item.CliInfo.HasUsageError, "前回成功後の取得失敗を取得エラーへ反映していません");
         Check.True(item.LastRefreshed <= lastSuccess, "取得失敗で最終成功時刻を進めました");
+        Check.Equal(71d, item.PrimaryLimit.RemainingPercent, "取得失敗で前回の正常値を消しました");
+        Check.True(item.PrimaryLimit.CustomDisplayPercentText != "--", "前回値を非表示にしました");
+        Check.True(item.PrimaryLimit.ResetTimeText.StartsWith("前回 "), "前回値の時刻を表示していません");
+        Check.True(item.CliInfo.StatusMessage.Contains("前回取得"), "前回値であることを案内していません");
 
         // 失敗の繰り返しでも、問い合わせた経路を成功した取得元として保存しない。
         await fetcher.FetchUsageAsync(item);
         CheckSource(item, PreviousSourceText(source));
+        Check.Equal(1, item.PrimaryLimit.ResetTimeText.Split("前回 ").Length - 1, "再取得のたびに前回表示が重複しています");
     }
 
     private static async Task CacheRoundTripAsync(UsageDataSource source)
@@ -149,6 +165,7 @@ internal static class AntigravityQuotaSourceTests
             ? "取得元：CLI（前回取得データ）"
             : "取得元：IDE（前回取得データ）");
         Check.True(item.CliInfo.HasUsageError, "再読込したキャッシュを最新の取得結果として扱っています");
+        Check.Equal(71d, item.PrimaryLimit.RemainingPercent, "再起動後に保存済みの利用枠を表示していません");
         Check.Equal(0, reloaded.AgyCalls, "キャッシュの表示でCLIを呼び出しました");
         Check.Equal(0, reloaded.IdeCalls, "キャッシュの表示でIDEを呼び出しました");
 
@@ -269,6 +286,19 @@ internal static class AntigravityQuotaSourceTests
         Check.Equal(2, item.LimitGroups[1].Limits.Count, "Gemini Model グループの枠数が2ではありません");
         Check.Equal("Claude & GPT Model", item.LimitGroups[2].GroupTitle, "3番目のグループ名が Claude & GPT Model ではありません");
         Check.Equal(2, item.LimitGroups[2].Limits.Count, "Claude & GPT Model グループの枠数が2ではありません");
+
+        var quota = fetcher.AgyResponse;
+        var remaining = item.AllLimits.Select(limit => limit.RemainingPercent).ToArray();
+        fetcher.AgyResponse = null;
+        await fetcher.FetchUsageAsync(item);
+        Check.True(item.CliInfo.HasUsageError, "前回値を最新として扱っています");
+        Check.Equal(3, item.LimitGroups.Count, "一時的な取得失敗でモデルグループを消しました");
+        Check.True(item.AllLimits.Select(limit => limit.RemainingPercent).SequenceEqual(remaining), "前回の残量が変わりました");
+        Check.True(item.AllLimits.All(limit => limit.ResetTimeText.StartsWith("前回 ")), "切替先の枠に前回表示がありません");
+        fetcher.AgyResponse = quota;
+        await fetcher.FetchUsageAsync(item);
+        Check.True(!item.CliInfo.HasUsageError, "復帰後も取得エラーが残っています");
+        Check.True(item.AllLimits.All(limit => !limit.ResetTimeText.Contains("前回")), "復帰後も前回表示が残っています");
     }
 
     private static FakeUsageFetcher CreateSuccessfulFetcher(string cachePath, UsageDataSource source) => new(cachePath)
@@ -287,10 +317,12 @@ internal static class AntigravityQuotaSourceTests
         public List<QuotaGroup>? IdeResponse { get; set; }
         public int AgyCalls { get; private set; }
         public int IdeCalls { get; private set; }
+        public bool ThrowCli { get; init; }
 
         protected override Task<List<QuotaGroup>?> FetchAgyQuotaAsync()
         {
             AgyCalls++;
+            if (ThrowCli) throw new IOException("テスト用起動エラー");
             return Task.FromResult(AgyResponse);
         }
 
